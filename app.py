@@ -62,7 +62,7 @@ if 'ollama_connected' not in st.session_state: st.session_state.ollama_connected
 if 'selected_ollama_model' not in st.session_state: st.session_state.selected_ollama_model = None
 if 'external_llm_client' not in st.session_state: st.session_state.external_llm_client = None
 if 'external_llm_connected' not in st.session_state: st.session_state.external_llm_connected = False
-if 'external_llm_model' not in st.session_state: st.session_state.external_llm_model = "gpt-5-nano"
+if 'external_llm_model' not in st.session_state: st.session_state.external_llm_model = EXTERNAL_LLM_MODELS[0]
 if 'history_manager' not in st.session_state: st.session_state.history_manager = get_history_manager()
 if 'last_prompt' not in st.session_state: st.session_state.last_prompt = None
 if 'prompt_counter' not in st.session_state: st.session_state.prompt_counter = 0
