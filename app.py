@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import sys
 import os
 
@@ -369,7 +370,6 @@ with tab1:
         st.markdown(f'<span class="prompt-label">🇺🇸 English Prompt{enhanced_label}</span>', unsafe_allow_html=True)
         
         # 복사 기능이 포함된 커스텀 텍스트 블록
-        import streamlit.components.v1 as components
         english_text_escaped = st.session_state.last_prompt['english'].replace('\\', '\\\\').replace('`', '\\`').replace('</script>', '<\\/script>')
         components.html(f'''
         <div style="position: relative; margin-bottom: 16px;">
@@ -407,12 +407,34 @@ with tab2:
     history_items = st.session_state.history_manager.get_recent(10)
     if not history_items:
         st.info("기록이 없습니다.")
-    for item in history_items:
+    for idx, item in enumerate(history_items):
         with st.expander(f"🕒 {item.timestamp[:16]} | {item.mode.upper()}"):
-            st.write("**한글 번역:**")
-            st.info(item.korean_prompt if item.korean_prompt else "번역 기록 없음")
-            st.write("**영문:**")
-            st.code(item.english_prompt)
+            st.markdown('<span class="prompt-label">🇰🇷 한글 번역</span>', unsafe_allow_html=True)
+            st.markdown(f'<div class="translated-box">{item.korean_prompt if item.korean_prompt else "번역 기록 없음"}</div>', unsafe_allow_html=True)
+            
+            st.markdown('<span class="prompt-label">🇺🇸 English Prompt</span>', unsafe_allow_html=True)
+            english_text_escaped = item.english_prompt.replace('\\', '\\\\').replace('`', '\\`').replace('</script>', '<\\/script>')
+            components.html(f'''
+            <div style="position: relative; margin-bottom: 16px;">
+                <button id="copyBtn_{idx}" 
+                        style="position: absolute; top: 8px; right: 8px; background: #374151; color: white; border: none; border-radius: 4px; padding: 6px 10px; cursor: pointer; font-size: 14px; z-index: 10;">
+                    📋
+                </button>
+                <div id="english-prompt-{idx}" style="background: #1e1e1e; color: #d4d4d4; padding: 16px; padding-right: 50px; border-radius: 8px; font-family: monospace; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto;">{english_text_escaped}</div>
+            </div>
+            <script>
+                document.getElementById('copyBtn_{idx}').addEventListener('click', function() {{
+                    const text = document.getElementById('english-prompt-{idx}').innerText;
+                    navigator.clipboard.writeText(text).then(() => {{
+                        this.innerText = '✅';
+                        setTimeout(() => {{ this.innerText = '📋'; }}, 1500);
+                    }}).catch(() => {{
+                        this.innerText = '❌';
+                        setTimeout(() => {{ this.innerText = '📋'; }}, 1500);
+                    }});
+                }});
+            </script>
+            ''', height=200)
 
 with tab3:
     st.markdown("### 사용 가이드\n1. 사용할 LLM 모델 선택 및 연결 (LLM API키 설정 필요)\n2. 세부 카테고리 취사 선택\n3. 생성 버튼을 누르면 최종 영문 프롬프트와 참고용 한국어 번역본이 생성됨")
