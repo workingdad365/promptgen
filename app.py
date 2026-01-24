@@ -77,6 +77,8 @@ st.markdown(
 
 if "mode" not in st.session_state:
     st.session_state.mode = "sfw"
+if "style" not in st.session_state:
+    st.session_state.style = "photorealistic"
 if "generator" not in st.session_state:
     st.session_state.generator = create_generator("sfw")
 if "ollama_client" not in st.session_state:
@@ -118,6 +120,15 @@ with st.sidebar:
     if new_mode != st.session_state.mode:
         st.session_state.mode = new_mode
         st.session_state.generator = create_generator(new_mode)
+        
+    st.markdown("### 🎨 아트 스타일")
+    style_options = {"실사 (Photorealistic)": "photorealistic", "애니메이션 (Anime)": "anime"}
+    selected_style_label = st.radio(
+        "스타일 선택",
+        options=list(style_options.keys()),
+        index=0 if st.session_state.style == "photorealistic" else 1,
+    )
+    st.session_state.style = style_options[selected_style_label]
 
     st.markdown("---")
 
@@ -330,10 +341,10 @@ with tab1:
             st.write("📝 기본 프롬프트 생성 중...")
             generator = create_generator(st.session_state.mode)
             english_prompt, negative_prompt = generator.generate(
-                selected_configs, user_requirements
+                selected_configs, user_requirements, style=st.session_state.style
             )
             original_prompt = english_prompt  # 개선 전 원본 저장
-            process_logs.append(f"[기본 생성] 완료 - 길이: {len(english_prompt)}자")
+            process_logs.append(f"[기본 생성] 완료 - 스타일: {st.session_state.style}, 길이: {len(english_prompt)}자")
             st.write(f"✅ 기본 프롬프트 생성 완료 ({len(english_prompt)}자)")
 
             llm_enhanced = False
@@ -354,7 +365,7 @@ with tab1:
                             f"[LLM 개선] Ollama 모델: {st.session_state.selected_ollama_model}"
                         )
                         english_prompt = enhancer.enhance_prompt(
-                            english_prompt, user_requirements=user_requirements
+                            english_prompt, user_requirements=user_requirements, style=st.session_state.style
                         )
                         llm_enhanced = True
                         enhanced_by = (
@@ -371,7 +382,7 @@ with tab1:
                             f"[LLM 개선] 외부LLM 모델: {st.session_state.external_llm_model}"
                         )
                         english_prompt = enhancer.enhance_prompt(
-                            english_prompt, user_requirements=user_requirements
+                            english_prompt, user_requirements=user_requirements, style=st.session_state.style
                         )
                         llm_enhanced = True
                         enhanced_by = st.session_state.external_llm_model

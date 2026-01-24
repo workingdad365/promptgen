@@ -378,6 +378,20 @@ QUALITY_PREFIXES = {
         "Sensual fine art photography,",
         "Boudoir photography masterpiece,",
         "Artistic intimate portrait,"
+    ],
+    "anime_sfw": [
+        "Masterpiece, best quality, anime style, 2d,",
+        "High quality anime art, cel shaded,",
+        "Detailed anime illustration, vibrant colors,",
+        "Beautiful anime character art,",
+        "Kyoto Animation style, studio ghibli style,"
+    ],
+    "anime_nsfw": [
+        "Masterpiece, best quality, anime style, 2d, ecchi,",
+        "High quality anime art, sensual anime style,",
+        "Detailed anime illustration, sensual gaze,",
+        "Alluring anime character art,",
+        "Mature anime style, cel shaded,"
     ]
 }
 
@@ -401,6 +415,23 @@ QUALITY_SUFFIXES = {
         
         "meticulous attention to form and lighting, natural skin tone gradients, "
         "professional boudoir quality, 8K resolution, artistic composition"
+    ],
+    "anime_sfw": [
+        "vibrant colors, detailed background, sharp lines, anime aesthetics, "
+        "expressive eyes, smooth shading, high definition",
+
+        "clean lines, cel shading, bright and colorful, atmospheric lighting, "
+        "detailed clothes and accessories, anime production quality",
+
+        "soft lighting, emotional atmosphere, detailed hair highlights, "
+        "perfect anatomy, highres, 4k"
+    ],
+    "anime_nsfw": [
+        "vibrant colors, blushing, soft shading, intimate atmosphere, "
+        "detailed body, glowing skin, anime aesthetics, high definition",
+
+        "cel shading, sensual lighting, expressive eyes, wet skin texture, "
+        "detailed anatomy, highres, 4k, fanbox quality"
     ]
 }
 

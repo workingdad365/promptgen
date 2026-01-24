@@ -153,7 +153,8 @@ class PromptGenerator:
         self,
         selected_options: Dict[str, str],
         user_requirements: Optional[str] = None,
-        template_style: str = "random"
+        template_style: str = "random",
+        style: str = "photorealistic"
     ) -> Tuple[str, str]:
         """
         프롬프트 생성
@@ -195,8 +196,22 @@ class PromptGenerator:
         all_parts = [p for p in all_parts if p]  # 빈 문자열 제거
         
         # 7. 품질 프리픽스/서픽스 선택
-        prefix = random.choice(QUALITY_PREFIXES[self.mode])
-        suffix = random.choice(QUALITY_SUFFIXES[self.mode])
+        prefix_key = self.mode
+        suffix_key = self.mode
+        
+        if style == "anime":
+            # anime_sfw 또는 anime_nsfw 키 사용
+            prefix_key = f"anime_{self.mode}"
+            suffix_key = f"anime_{self.mode}"
+            
+            # 키가 없는 경우 안전장치 (기본 sfw)
+            if prefix_key not in QUALITY_PREFIXES:
+                prefix_key = "anime_sfw"
+            if suffix_key not in QUALITY_SUFFIXES:
+                suffix_key = "anime_sfw"
+        
+        prefix = random.choice(QUALITY_PREFIXES.get(prefix_key, QUALITY_PREFIXES["sfw"]))
+        suffix = random.choice(QUALITY_SUFFIXES.get(suffix_key, QUALITY_SUFFIXES["sfw"]))
         
         # 8. 최종 프롬프트 구성
         main_description = ", ".join(all_parts)
@@ -216,7 +231,8 @@ class PromptGenerator:
         selected_options: Dict[str, str],
         user_requirements: Optional[str],
         ollama_client,
-        model_name: str
+        model_name: str,
+        style: str = "photorealistic"
     ) -> Tuple[str, str]:
         """
         Ollama 모델을 사용한 프롬프트 생성
@@ -224,16 +240,18 @@ class PromptGenerator:
         기본 생성된 프롬프트를 Ollama 모델로 개선합니다.
         """
         # 기본 프롬프트 생성
-        base_positive, base_negative = self.generate(selected_options, user_requirements)
+        base_positive, base_negative = self.generate(selected_options, user_requirements, style=style)
         
         # Ollama로 개선 요청
-        system_prompt = """You are a world-class prompt engineer specializing in photorealistic AI image generation.
+        style_desc = "photorealistic" if style == "photorealistic" else "high-quality anime style"
+        
+        system_prompt = f"""You are a world-class prompt engineer specializing in {style_desc} AI image generation.
 Your task is to enhance and refine the given prompt while:
 1. Maintaining natural, flowing English
-2. Keeping technical photography terms accurate
+2. Keeping technical details accurate for the target style ({style})
 3. Ensuring coherent visual storytelling
 4. Preserving the original intent and style
-5. Adding subtle details that enhance realism
+5. Adding subtle details that enhance quality
 
 IMPORTANT: Return ONLY the enhanced prompt, no explanations or additional text."""
 

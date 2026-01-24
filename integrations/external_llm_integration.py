@@ -318,21 +318,21 @@ class ExternalLLMPromptEnhancer:
     외부 LLM을 활용한 프롬프트 개선기
     """
 
-    ENHANCEMENT_SYSTEM_PROMPT = """You are an expert prompt engineer for photorealistic AI image generation models like Stable Diffusion and Flux.
-
-Your role is to enhance image generation prompts to be:
-1. More natural and flowing in English
-2. More detailed and specific
-3. Better structured for optimal model interpretation
-4. Consistent in style and tone
-
-Rules:
-- Keep the enhanced prompt concise but detailed
-- Maintain all key elements from the original
-- Use professional photography terminology
-- Ensure natural language flow
-- DO NOT add explanations, just return the enhanced prompt
-- DO NOT change the core subject or theme"""
+    ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE = """You are an expert prompt engineer for {style_desc} AI image generation models like Stable Diffusion and Flux.
+ 
+ Your role is to enhance image generation prompts to be:
+ 1. More natural and flowing in English
+ 2. More detailed and specific
+ 3. Better structured for optimal model interpretation
+ 4. Consistent in style and tone
+ 
+ Rules:
+ - Keep the enhanced prompt concise but detailed
+ - Maintain all key elements from the original
+ - Use professional {term_type} terminology
+ - Ensure natural language flow
+ - DO NOT add explanations, just return the enhanced prompt
+ - DO NOT change the core subject or theme"""
 
     TRANSLATION_SYSTEM_PROMPT = """You are a professional translator specializing in creative and technical content.
 
@@ -349,17 +349,21 @@ Rules:
         self.client = client
 
     def enhance_prompt(
-        self, original_prompt: str, user_requirements: Optional[str] = None
+        self, original_prompt: str, user_requirements: Optional[str] = None, style: str = "photorealistic"
     ) -> str:
         """프롬프트 개선"""
         user_content = f"Enhance this prompt:\n{original_prompt}"
         if user_requirements:
             user_content += f"\n\nAdditional requirements: {user_requirements}"
 
+        style_desc = "photorealistic" if style == "photorealistic" else "high-quality anime style"
+        term_type = "photography" if style == "photorealistic" else "anime art"
+        system_prompt = self.ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE.format(style_desc=style_desc, term_type=term_type)
+
         try:
             response = self.client.chat(
                 messages=[
-                    {"role": "system", "content": self.ENHANCEMENT_SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ]
             )
