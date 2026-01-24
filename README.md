@@ -17,7 +17,19 @@
 
 ## API 키 설정
 
-외부 LLM 사용 시 환경변수에 API 키 설정이 필요함.
+외부 LLM 사용 시 환경변수에 API 키 설정이 필요함.  아래와 같이 `.env` 파일을 사용하여 간편하게 관리할 수 있음.
+
+1. `.env.example` 파일을 복사하여 `.env` 파일 생성
+2. `.env` 파일에 소유한 API 키 입력
+
+```bash
+# .env 파일 예시
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=AIza...
+ANTHROPIC_API_KEY=sk-ant...
+```
+
+또는 직접 환경변수로 설정할 수도 있음:
 
 ```bash
 # Windows
@@ -31,7 +43,7 @@ export GEMINI_API_KEY=your-gemini-key
 export ANTHROPIC_API_KEY=your-anthropic-key
 ```
 
-Ollama 사용 시에는 별도 API 키 없이 로컬 서버 연결만 필요함.
+Ollama 사용 시에는 별도 API 키 없이 로컬 서버 연결만 필요.
 
 ## 설치 및 실행
 
