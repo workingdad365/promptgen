@@ -51,9 +51,9 @@ MODIFIERS = {
 DATA = {
     "나이/성별": {
         "sfw": {
-            "20대 섹시한 여성": "sexy woman in her 20s",
             "20대 귀여운 여성": "cute woman in her 20s",
             "20대 예쁜 여성": "beautiful woman in her 20s",
+            "20대 섹시한 여성": "sexy woman in her 20s",
             "20대 우아한 여성": "elegant woman in her 20s",
             "30대 세련된 여성": "sophisticated lady in her 30s",
             "우아한 젊은 여성": "graceful young woman",
@@ -150,6 +150,7 @@ DATA = {
     
     "의상": {
         "sfw": {
+            "레깅스": "tight leggings",
             "우아한 실크 이브닝 드레스": "elegant silk evening gown",
             "캐주얼 시크 오버사이즈 스웨터": "casual chic oversized sweater",
             "맞춤 정장 블레이저": "tailored professional blazer",
