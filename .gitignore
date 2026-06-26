@@ -19,7 +19,7 @@ ENV/
 .python-version
 uv.lock
 
-# Environment variables
+# Environment variables 
 .env
 !.env.example
 
