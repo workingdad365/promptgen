@@ -19,7 +19,7 @@ ENV/
 .python-version
 uv.lock
 
-# Environment variables (시크릿 포함, 절대 커밋 금지)
+# Environment variables
 .env
 !.env.example
 
