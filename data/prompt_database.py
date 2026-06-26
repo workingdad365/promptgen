@@ -165,6 +165,7 @@ DATA = {
             "세련된 터틀넥": "sophisticated turtleneck",
             "우아한 실크 기모노": "elegant silk kimono",
             "전통 치파오": "traditional Cheongsam",
+            "전통 아오자이": "traditional Ao Dai dress",
             "스타일리시 패딩 재킷": "stylish puffer jacket",
             "로맨틱 플로럴 미디 드레스": "romantic floral midi dress",
             "모던 오피스 룩": "modern office attire",

@@ -28,7 +28,7 @@ except ImportError:
 
 
 # 지원되는 모델 목록 (첫 번째가 기본값)
-EXTERNAL_LLM_MODELS = ["gemini-2.5-flash-lite", "gpt-5-nano", "claude-haiku-4-5"]
+EXTERNAL_LLM_MODELS = ["gpt-5.4-mini", "gemini-3.5-flash", "claude-haiku-4-5"]
 
 
 def get_provider_from_model(model: str) -> str:
@@ -74,7 +74,7 @@ class ExternalLLMClient:
     모델명에 따라 OpenAI, Gemini, Claude API 자동 선택
     """
 
-    def __init__(self, model: str = "gpt-5-nano"):
+    def __init__(self, model: str = "gpt-5.4-mini"):
         """
         Args:
             model: 사용할 모델명
@@ -390,4 +390,4 @@ Rules:
 # 하위 호환성을 위한 별칭
 OpenAIClient = ExternalLLMClient
 OpenAIPromptEnhancer = ExternalLLMPromptEnhancer
-check_openai_api_key = lambda: check_api_key_for_model("gpt-5-nano")
+check_openai_api_key = lambda: check_api_key_for_model("gpt-5.4-mini")
