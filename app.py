@@ -1,13 +1,15 @@
 import streamlit as st
-import streamlit.components.v1 as components
+import html as html_lib
 import sys
 import os
 from dotenv import load_dotenv
 
-# .env 파일 로드
-load_dotenv(override=True)
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 실행 위치와 무관하게 프로젝트 루트의 .env 로드
+load_dotenv(os.path.join(APP_DIR, ".env"), override=True)
+
+sys.path.insert(0, APP_DIR)
 
 from data.prompt_database import (
     DATA,
@@ -25,10 +27,12 @@ from integrations.external_llm_integration import (
     ExternalLLMClient,
     ExternalLLMPromptEnhancer,
     check_api_key_for_model,
-    EXTERNAL_LLM_MODELS,
-    get_provider_from_model,
+    get_external_llm_models,
+    get_provider_label,
 )
+from integrations.model_config import ModelConfigError
 from utils.history_manager import get_history_manager
+from utils.settings_manager import get_last_external_model, set_last_external_model
 
 st.set_page_config(
     page_title="Prompt Generator for Images",
@@ -75,6 +79,43 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+try:
+    EXTERNAL_LLM_MODELS = get_external_llm_models()
+    MODEL_CONFIG_ERROR = None
+except ModelConfigError as e:
+    EXTERNAL_LLM_MODELS = []
+    MODEL_CONFIG_ERROR = str(e)
+
+
+def render_copyable_prompt(text: str, element_id: str, height: int = 200) -> None:
+    """복사 버튼이 포함된 프롬프트 블록 렌더링"""
+    escaped = html_lib.escape(text)
+    st.iframe(
+        f"""
+        <div style="position: relative; margin-bottom: 16px;">
+            <button id="copyBtn-{element_id}"
+                    style="position: absolute; top: 8px; right: 8px; background: #374151; color: white; border: none; border-radius: 4px; padding: 6px 10px; cursor: pointer; font-size: 14px; z-index: 10;">
+                📋
+            </button>
+            <div id="prompt-{element_id}" style="background: #1e1e1e; color: #d4d4d4; padding: 16px; padding-right: 50px; border-radius: 8px; font-family: monospace; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; max-height: {height - 16}px; overflow-y: auto;">{escaped}</div>
+        </div>
+        <script>
+            document.getElementById('copyBtn-{element_id}').addEventListener('click', function() {{
+                const text = document.getElementById('prompt-{element_id}').innerText;
+                navigator.clipboard.writeText(text).then(() => {{
+                    this.innerText = '✅';
+                    setTimeout(() => {{ this.innerText = '📋'; }}, 1500);
+                }}).catch(() => {{
+                    this.innerText = '❌';
+                    setTimeout(() => {{ this.innerText = '📋'; }}, 1500);
+                }});
+            }});
+        </script>
+        """.strip(),
+        height=height,
+    )
+
+
 if "mode" not in st.session_state:
     st.session_state.mode = "sfw"
 if "style" not in st.session_state:
@@ -92,7 +133,13 @@ if "external_llm_client" not in st.session_state:
 if "external_llm_connected" not in st.session_state:
     st.session_state.external_llm_connected = False
 if "external_llm_model" not in st.session_state:
-    st.session_state.external_llm_model = EXTERNAL_LLM_MODELS[0]
+    st.session_state.external_llm_model = (
+        get_last_external_model() if EXTERNAL_LLM_MODELS else None
+    )
+    if st.session_state.external_llm_model not in EXTERNAL_LLM_MODELS:
+        st.session_state.external_llm_model = (
+            EXTERNAL_LLM_MODELS[0] if EXTERNAL_LLM_MODELS else None
+        )
 if "history_manager" not in st.session_state:
     st.session_state.history_manager = get_history_manager()
 if "last_prompt" not in st.session_state:
@@ -134,62 +181,67 @@ with st.sidebar:
 
     # 외부 LLM 연동
     st.markdown("### 🔑 외부 LLM 연동")
-    st.session_state.external_llm_model = st.selectbox(
-        "모델 선택",
-        options=EXTERNAL_LLM_MODELS,
-        index=EXTERNAL_LLM_MODELS.index(st.session_state.external_llm_model)
-        if st.session_state.external_llm_model in EXTERNAL_LLM_MODELS
-        else 0,
-        key="external_model_select",
-    )
-
-    # 선택된 모델의 제공자 표시
-    provider = get_provider_from_model(st.session_state.external_llm_model)
-    provider_display = {
-        "openai": "OpenAI",
-        "gemini": "Google Gemini",
-        "anthropic": "Anthropic Claude",
-    }.get(provider, provider)
-    st.caption(f"제공자: {provider_display}")
-
-    external_msg = None
-    external_msg_type = None
-    col_ext1, col_ext2 = st.columns(2)
-    with col_ext1:
-        if st.button("🔌 연결", use_container_width=True, key="external_connect"):
-            has_key, key_msg = check_api_key_for_model(
-                st.session_state.external_llm_model
-            )
-            if not has_key:
-                external_msg, external_msg_type = f"❌ {key_msg}", "error"
-            else:
-                client = ExternalLLMClient(model=st.session_state.external_llm_model)
-                success, message = client.test_connection()
-                if success:
-                    st.session_state.external_llm_client = client
-                    st.session_state.external_llm_connected = True
-                    st.session_state.chk_llm_enhance = True
-                    st.session_state.chk_llm_translate = True
-                    external_msg, external_msg_type = message, "success"
-                else:
-                    st.session_state.external_llm_connected = False
-                    external_msg, external_msg_type = message, "error"
-    with col_ext2:
-        if st.button("🔌 해제", use_container_width=True, key="external_disconnect"):
+    if not EXTERNAL_LLM_MODELS:
+        st.error(f"❌ 모델 설정을 불러오지 못했습니다: {MODEL_CONFIG_ERROR}")
+    else:
+        selected_model = st.selectbox(
+            "모델 선택",
+            options=EXTERNAL_LLM_MODELS,
+            index=EXTERNAL_LLM_MODELS.index(st.session_state.external_llm_model)
+            if st.session_state.external_llm_model in EXTERNAL_LLM_MODELS
+            else 0,
+            key="external_model_select",
+        )
+        if selected_model != st.session_state.external_llm_model:
             st.session_state.external_llm_client = None
             st.session_state.external_llm_connected = False
-            external_msg, external_msg_type = "해제됨", "info"
+        st.session_state.external_llm_model = selected_model
+        set_last_external_model(selected_model)
 
-    if external_msg:
-        if external_msg_type == "success":
-            st.success(external_msg)
-        elif external_msg_type == "error":
-            st.error(external_msg)
-        else:
-            st.info(external_msg)
+        st.caption(f"제공자: {get_provider_label(selected_model)}")
 
-    if st.session_state.external_llm_connected:
-        st.success(f"✅ 연결됨: {st.session_state.external_llm_model}")
+        external_msg = None
+        external_msg_type = None
+        col_ext1, col_ext2 = st.columns(2)
+        with col_ext1:
+            if st.button("🔌 연결", use_container_width=True, key="external_connect"):
+                has_key, key_msg = check_api_key_for_model(
+                    st.session_state.external_llm_model
+                )
+                if not has_key:
+                    external_msg, external_msg_type = f"❌ {key_msg}", "error"
+                else:
+                    client = ExternalLLMClient(
+                        model=st.session_state.external_llm_model
+                    )
+                    success, message = client.test_connection()
+                    if success:
+                        st.session_state.external_llm_client = client
+                        st.session_state.external_llm_connected = True
+                        st.session_state.chk_llm_enhance = True
+                        st.session_state.chk_llm_translate = True
+                        external_msg, external_msg_type = message, "success"
+                    else:
+                        st.session_state.external_llm_connected = False
+                        external_msg, external_msg_type = message, "error"
+        with col_ext2:
+            if st.button(
+                "🔌 해제", use_container_width=True, key="external_disconnect"
+            ):
+                st.session_state.external_llm_client = None
+                st.session_state.external_llm_connected = False
+                external_msg, external_msg_type = "해제됨", "info"
+
+        if external_msg:
+            if external_msg_type == "success":
+                st.success(external_msg)
+            elif external_msg_type == "error":
+                st.error(external_msg)
+            else:
+                st.info(external_msg)
+
+        if st.session_state.external_llm_connected:
+            st.success(f"✅ 연결됨: {st.session_state.external_llm_model}")
 
     st.markdown("---")
 
@@ -514,36 +566,7 @@ with tab1:
         )
 
         # 복사 기능이 포함된 커스텀 텍스트 블록
-        english_text_escaped = (
-            st.session_state.last_prompt["english"]
-            .replace("\\", "\\\\")
-            .replace("`", "\\`")
-            .replace("</script>", "<\\/script>")
-        )
-        components.html(
-            f"""
-        <div style="position: relative; margin-bottom: 16px;">
-            <button id="copyBtn" 
-                    style="position: absolute; top: 8px; right: 8px; background: #374151; color: white; border: none; border-radius: 4px; padding: 6px 10px; cursor: pointer; font-size: 14px; z-index: 10;">
-                📋
-            </button>
-            <div id="english-prompt" style="background: #1e1e1e; color: #d4d4d4; padding: 16px; padding-right: 50px; border-radius: 8px; font-family: monospace; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto;">{english_text_escaped}</div>
-        </div>
-        <script>
-            document.getElementById('copyBtn').addEventListener('click', function() {{
-                const text = document.getElementById('english-prompt').innerText;
-                navigator.clipboard.writeText(text).then(() => {{
-                    this.innerText = '✅';
-                    setTimeout(() => {{ this.innerText = '📋'; }}, 1500);
-                }}).catch(() => {{
-                    this.innerText = '❌';
-                    setTimeout(() => {{ this.innerText = '📋'; }}, 1500);
-                }});
-            }});
-        </script>
-        """,
-            height=200,
-        )
+        render_copyable_prompt(st.session_state.last_prompt["english"], "english")
 
         # 4. 네거티브 프롬프트
         with st.expander("📛 Negative Prompt"):
@@ -576,35 +599,7 @@ with tab2:
                 '<span class="prompt-label">🇺🇸 English Prompt</span>',
                 unsafe_allow_html=True,
             )
-            english_text_escaped = (
-                item.english_prompt.replace("\\", "\\\\")
-                .replace("`", "\\`")
-                .replace("</script>", "<\\/script>")
-            )
-            components.html(
-                f"""
-            <div style="position: relative; margin-bottom: 16px;">
-                <button id="copyBtn_{idx}" 
-                        style="position: absolute; top: 8px; right: 8px; background: #374151; color: white; border: none; border-radius: 4px; padding: 6px 10px; cursor: pointer; font-size: 14px; z-index: 10;">
-                    📋
-                </button>
-                <div id="english-prompt-{idx}" style="background: #1e1e1e; color: #d4d4d4; padding: 16px; padding-right: 50px; border-radius: 8px; font-family: monospace; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto;">{english_text_escaped}</div>
-            </div>
-            <script>
-                document.getElementById('copyBtn_{idx}').addEventListener('click', function() {{
-                    const text = document.getElementById('english-prompt-{idx}').innerText;
-                    navigator.clipboard.writeText(text).then(() => {{
-                        this.innerText = '✅';
-                        setTimeout(() => {{ this.innerText = '📋'; }}, 1500);
-                    }}).catch(() => {{
-                        this.innerText = '❌';
-                        setTimeout(() => {{ this.innerText = '📋'; }}, 1500);
-                    }});
-                }});
-            </script>
-            """,
-                height=200,
-            )
+            render_copyable_prompt(item.english_prompt, f"history-{idx}")
 
 with tab3:
     st.markdown(

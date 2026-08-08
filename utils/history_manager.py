@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict
@@ -26,7 +27,8 @@ class PromptHistoryItem:
 
 class HistoryManager:
    
-    DEFAULT_HISTORY_FILE = "prompt_history.json"
+    # 실행 위치와 무관하게 프로젝트 루트에 저장
+    DEFAULT_HISTORY_FILE = str(Path(__file__).resolve().parent.parent / "prompt_history.json")
     MAX_HISTORY_ITEMS = 100
     
     def __init__(self, history_file: Optional[str] = None):

@@ -1,0 +1,16 @@
+"""promptgen 콘솔 스크립트 진입점."""
+
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    from streamlit.web import cli as stcli
+
+    app_path = Path(__file__).resolve().parent / "app.py"
+    sys.argv = ["streamlit", "run", str(app_path), *sys.argv[1:]]
+    return stcli.main()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

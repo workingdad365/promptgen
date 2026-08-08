@@ -38,7 +38,7 @@ def log_llm_interaction(
 
     # 출력 메시지 출력
     print("📤 [Output Response]")
-    for line in response.splitlines():
+    for line in (response or "(빈 응답)").splitlines():
         print(f"  {line}")
 
     # 토큰 정보 출력 (있는 경우)

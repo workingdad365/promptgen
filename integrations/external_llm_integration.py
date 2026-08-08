@@ -1,6 +1,11 @@
-import os
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from utils.logger import log_llm_interaction
+from integrations.model_config import (
+    ModelConfig,
+    get_default_model,
+    get_model_config,
+    get_model_names,
+)
 
 # OpenAI
 try:
@@ -27,60 +32,64 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 
-# 지원되는 모델 목록 (첫 번째가 기본값)
-EXTERNAL_LLM_MODELS = ["gpt-5.4-mini", "gemini-3.5-flash", "claude-haiku-4-5"]
+def get_external_llm_models() -> List[str]:
+    """models.json 에 등록된 모델명 목록 (첫 번째가 기본값)"""
+    return get_model_names()
 
 
 def get_provider_from_model(model: str) -> str:
     """모델명에서 제공자 판별"""
-    if model.startswith("gpt"):
-        return "openai"
-    elif model.startswith("gemini"):
-        return "gemini"
-    elif model.startswith("claude"):
-        return "anthropic"
-    return "unknown"
+    config = get_model_config(model)
+    return config.provider if config else "unknown"
+
+
+def get_provider_label(model: str) -> str:
+    """모델명에 대응하는 제공자 표시명"""
+    config = get_model_config(model)
+    return config.provider_label if config else "알 수 없음"
 
 
 def check_api_key_for_model(model: str) -> Tuple[bool, str]:
     """모델에 맞는 API 키 확인"""
-    provider = get_provider_from_model(model)
+    config = get_model_config(model)
+    if config is None:
+        return False, f"models.json 에 등록되지 않은 모델: {model}"
 
-    if provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY")
-        if api_key:
-            return True, "OPENAI_API_KEY 확인됨"
-        return False, "OPENAI_API_KEY 환경변수가 설정되지 않았습니다."
+    if config.api_key:
+        return True, f"{config.api_key_env} 확인됨"
+    return False, f"{config.api_key_env} 환경변수가 설정되지 않았습니다."
 
-    elif provider == "gemini":
-        api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
-            return True, "GEMINI_API_KEY 확인됨"
-        return False, "GEMINI_API_KEY 환경변수가 설정되지 않았습니다."
 
-    elif provider == "anthropic":
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if api_key:
-            return True, "ANTHROPIC_API_KEY 확인됨"
-        return False, "ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다."
+def _extract_openai_content(response) -> str:
+    """OpenAI 형식 응답에서 본문 추출 (추론 전용 응답/빈 응답 방어)"""
+    choice = response.choices[0]
+    content = choice.message.content or getattr(choice.message, "reasoning", None)
+    if content:
+        return content
 
-    return False, f"알 수 없는 모델: {model}"
+    finish_reason = getattr(choice, "finish_reason", None) or "unknown"
+    raise RuntimeError(
+        f"응답 본문이 비어 있습니다 (finish_reason={finish_reason}). "
+        "출력 토큰 한도 초과 또는 콘텐츠 필터링일 수 있습니다."
+    )
+
 
 
 class ExternalLLMClient:
     """
     외부 LLM API 통합 클라이언트
 
-    모델명에 따라 OpenAI, Gemini, Claude API 자동 선택
+    models.json 의 provider 설정에 따라 OpenAI / Gemini / Claude / OpenAI 호환 API 선택
     """
 
-    def __init__(self, model: str = "gpt-5.4-mini"):
+    def __init__(self, model: Optional[str] = None):
         """
         Args:
-            model: 사용할 모델명
+            model: 사용할 모델명 (생략 시 models.json 의 첫 번째 모델)
         """
-        self.model = model
-        self.provider = get_provider_from_model(model)
+        self.model = model or get_default_model()
+        self.config: Optional[ModelConfig] = get_model_config(self.model)
+        self.provider = self.config.provider if self.config else "unknown"
         self._client = None
         self._connected = False
 
@@ -91,12 +100,17 @@ class ExternalLLMClient:
         Returns:
             (연결 성공 여부, 메시지)
         """
+        if self.config is None:
+            return False, f"❌ models.json 에 등록되지 않은 모델: {self.model}"
+
         if self.provider == "openai":
             return self._test_openai()
         elif self.provider == "gemini":
             return self._test_gemini()
         elif self.provider == "anthropic":
             return self._test_anthropic()
+        elif self.provider == "openai_compat":
+            return self._test_openai_compat()
 
         return False, f"❌ 알 수 없는 제공자: {self.provider}"
 
@@ -108,9 +122,9 @@ class ExternalLLMClient:
                 "❌ openai 패키지가 설치되어 있지 않습니다. pip install openai 실행 필요",
             )
 
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = self.config.api_key
         if not api_key:
-            return False, "❌ OPENAI_API_KEY 환경변수가 설정되지 않았습니다."
+            return False, f"❌ {self.config.api_key_env} 환경변수가 설정되지 않았습니다."
 
         try:
             self._client = OpenAI(api_key=api_key)
@@ -127,6 +141,31 @@ class ExternalLLMClient:
             self._connected = False
             return False, f"❌ OpenAI 연결 실패: {str(e)}"
 
+    def _test_openai_compat(self) -> Tuple[bool, str]:
+        """OpenAI 호환 API 연결 테스트"""
+        if not OPENAI_AVAILABLE:
+            return (
+                False,
+                "❌ openai 패키지가 설치되어 있지 않습니다. pip install openai 실행 필요",
+            )
+
+        api_key = self.config.api_key
+        if not api_key:
+            return False, f"❌ {self.config.api_key_env} 환경변수가 설정되지 않았습니다."
+
+        try:
+            self._client = OpenAI(api_key=api_key, base_url=self.config.base_url)
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=10,
+            )
+            self._connected = True
+            return True, f"✅ 연결 성공! (모델: {self.model})"
+        except Exception as e:
+            self._connected = False
+            return False, f"❌ 연결 실패: {str(e)}"
+
     def _test_gemini(self) -> Tuple[bool, str]:
         """Gemini 연결 테스트"""
         if not GEMINI_AVAILABLE:
@@ -135,9 +174,9 @@ class ExternalLLMClient:
                 "❌ google-genai 패키지가 설치되어 있지 않습니다. pip install google-genai 실행 필요",
             )
 
-        api_key = os.getenv("GEMINI_API_KEY")
+        api_key = self.config.api_key
         if not api_key:
-            return False, "❌ GEMINI_API_KEY 환경변수가 설정되지 않았습니다."
+            return False, f"❌ {self.config.api_key_env} 환경변수가 설정되지 않았습니다."
 
         try:
             self._client = genai.Client(api_key=api_key)
@@ -158,9 +197,9 @@ class ExternalLLMClient:
                 "❌ anthropic 패키지가 설치되어 있지 않습니다. pip install anthropic 실행 필요",
             )
 
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        api_key = self.config.api_key
         if not api_key:
-            return False, "❌ ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다."
+            return False, f"❌ {self.config.api_key_env} 환경변수가 설정되지 않았습니다."
 
         try:
             self._client = anthropic.Anthropic(api_key=api_key)
@@ -200,8 +239,37 @@ class ExternalLLMClient:
             return self._chat_gemini(messages, max_tokens)
         elif self.provider == "anthropic":
             return self._chat_anthropic(messages, max_tokens)
+        elif self.provider == "openai_compat":
+            return self._chat_openai_compat(messages, max_tokens)
 
         raise RuntimeError(f"알 수 없는 제공자: {self.provider}")
+
+    def _chat_openai_compat(self, messages: list, max_tokens: int) -> dict:
+        """OpenAI 호환 API 채팅"""
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=max_tokens,
+            )
+
+            content = _extract_openai_content(response)
+
+            tokens = None
+            if hasattr(response, "usage") and response.usage:
+                tokens = {
+                    "input": response.usage.prompt_tokens,
+                    "output": response.usage.completion_tokens,
+                    "total": response.usage.total_tokens,
+                }
+
+            log_llm_interaction(
+                self.config.provider_label, self.model, messages, content, tokens
+            )
+
+            return {"message": {"content": content}}
+        except Exception as e:
+            raise RuntimeError(f"요청 실패: {str(e)}")
 
     def _chat_openai(self, messages: list, max_tokens: int) -> dict:
         """OpenAI 채팅"""
@@ -214,7 +282,7 @@ class ExternalLLMClient:
                 reasoning_effort="low",
             )
 
-            content = response.choices[0].message.content
+            content = _extract_openai_content(response)
 
             # 토큰 정보 추출
             tokens = None
@@ -259,6 +327,10 @@ class ExternalLLMClient:
             )
 
             content = response.text
+            if not content:
+                raise RuntimeError(
+                    "응답 본문이 비어 있습니다 (안전 필터 차단 또는 토큰 한도 초과 가능)."
+                )
 
             # 토큰 정보 추출
             tokens = None
@@ -295,6 +367,10 @@ class ExternalLLMClient:
                 messages=user_messages,
             )
 
+            if not response.content:
+                raise RuntimeError(
+                    "응답 본문이 비어 있습니다 (안전 필터 차단 또는 토큰 한도 초과 가능)."
+                )
             content = response.content[0].text
 
             # 토큰 정보 추출
@@ -390,4 +466,3 @@ Rules:
 # 하위 호환성을 위한 별칭
 OpenAIClient = ExternalLLMClient
 OpenAIPromptEnhancer = ExternalLLMPromptEnhancer
-check_openai_api_key = lambda: check_api_key_for_model("gpt-5.4-mini")

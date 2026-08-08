@@ -17,8 +17,7 @@ ENV/
 *.swo
 
 # uv
-.python-version
-uv.lock
+# .python-version, uv.lock 은 환경 재현성을 위해 커밋함
 
 # Environment variables 
 .env
@@ -26,6 +25,7 @@ uv.lock
 
 # App data
 prompt_history.json
+user_settings.json
 
 # OS
 .DS_Store
