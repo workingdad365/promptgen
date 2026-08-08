@@ -3,8 +3,30 @@ from typing import Dict, Optional, List, Tuple
 from data.prompt_database import (
     MODIFIERS, DATA, PROMPT_TEMPLATES,
     QUALITY_PREFIXES, QUALITY_SUFFIXES, NEGATIVE_PROMPTS,
+    NATURAL_DIRECTIVE_KEYS, build_natural_directives,
     get_category_options, get_modifier_options, get_english_value
 )
+from data.llm_prompts import build_enhancement_system_prompt
+
+
+def attach_natural_directives(
+    prompt: str, keys: Optional[List[str]] = None
+) -> str:
+    """
+    프롬프트 뒤에 자연스러운 사진 지시문 블록을 부착
+
+    LLM 개선 단계에서 지시문이 요약/변형되는 것을 막기 위해
+    본문 개선이 끝난 뒤 마지막에 붙이는 용도로 사용한다.
+
+    Args:
+        prompt: 본문 프롬프트
+        keys: 포함할 지시문 키 목록 (None 이면 전체)
+    """
+    directives = build_natural_directives(keys)
+    if not directives:
+        return prompt
+
+    return f"{prompt}\n\n{directives}"
 
 
 class PromptGenerator:
@@ -68,37 +90,44 @@ class PromptGenerator:
         gender: Optional[str],
         race: Optional[str],
         skin: str,
-        adjective: str
+        adjective: str,
+        shot: Optional[str] = None
     ) -> str:
-        if not gender:
-            return ""
-        
         parts = []
         if adjective:
             parts.append(adjective)
         if race:
             parts.append(race)
-        parts.append(gender)
-        parts.append(f"with {skin}")
-        
-        return " ".join(parts)
+        if gender:
+            parts.append(gender)
+        if skin:
+            parts.append(f"with {skin}")
+
+        subject = " ".join(parts)
+
+        # 샷/프레이밍은 주제 앞에 놓아 표현 범위를 먼저 규정
+        if shot:
+            return f"{shot} of {subject}" if subject else shot
+
+        return subject
     
     def _build_appearance_description(
         self,
         hair: Optional[str],
         clothing: Optional[str],
-        body_type: Optional[str]
+        body_type: Optional[str],
+        use_modifiers: bool = True
     ) -> List[str]:
         """외모 설명 구성"""
         parts = []
         
         if hair:
-            hair_state = self._select_modifier("상태")
-            parts.append(f"{hair_state} {hair}")
+            hair_state = self._select_modifier("상태") if use_modifiers else ""
+            parts.append(f"{hair_state} {hair}".strip())
         
         if clothing:
             # 의상 재질 추가 (40% 확률)
-            if random.random() > 0.6:
+            if use_modifiers and random.random() > 0.6:
                 fabric = self._select_modifier("의상재질")
                 parts.append(f"wearing {fabric} {clothing}")
             else:
@@ -154,23 +183,39 @@ class PromptGenerator:
         selected_options: Dict[str, str],
         user_requirements: Optional[str] = None,
         template_style: str = "random",
-        style: str = "photorealistic"
+        style: str = "photorealistic",
+        use_modifiers: bool = True,
+        use_quality_prefix: bool = True,
+        use_natural_photo: bool = False,
+        natural_directive_keys: Optional[List[str]] = None,
+        include_natural_directives: bool = True
     ) -> Tuple[str, str]:
         """
         프롬프트 생성
-        
+
         Args:
             selected_options: 카테고리별 사용자 선택 (한글 키)
             user_requirements: 추가 요구사항 (선택)
             template_style: 템플릿 스타일
-        
+            use_modifiers: MODIFIERS(형용사/피부질감/상태/의상재질) 포함 여부
+            use_quality_prefix: QUALITY_PREFIXES 포함 여부
+            use_natural_photo: 자연스러운 사진 모드 (실사 스타일에서만 적용)
+            natural_directive_keys: 포함할 자연스러움 지시문 키 목록 (None 이면 전체)
+            include_natural_directives: 지시문 블록을 결과에 포함할지 여부.
+                False 면 본문만 반환하므로 LLM 개선 후 build_natural_directives()로 별도 부착
+
         Returns:
             (positive_prompt, negative_prompt) 튜플 - 영문
         """
+        # 자연스러운 사진 모드는 실사 스타일에서만 의미가 있음
+        natural = use_natural_photo and style == "photorealistic"
+
         # 1. 핵심 수식어 선택
-        adjective = self._select_modifier("형용사")
-        skin = self._select_modifier("피부질감")
-        
+        # 자연 모드에서는 과장 형용사/인공적인 피부 표현을 배제
+        allow_modifiers = use_modifiers and not natural
+        adjective = self._select_modifier("형용사") if allow_modifiers else ""
+        skin = self._select_modifier("피부질감") if allow_modifiers else ""
+
         # 2. 카테고리별 아이템 선택 (한글 -> 영문 변환)
         gender = self._select_item("나이/성별", selected_options.get("나이/성별", "랜덤"))
         race = self._select_item("인종/외모", selected_options.get("인종/외모", "랜덤"))
@@ -178,52 +223,69 @@ class PromptGenerator:
         clothing = self._select_item("의상", selected_options.get("의상", "랜덤"))
         body_type = self._select_item("몸매/체형", selected_options.get("몸매/체형", "랜덤"))
         pose = self._select_item("포즈/행동", selected_options.get("포즈/행동", "랜덤"))
+        shot = self._select_item("샷/프레이밍", selected_options.get("샷/프레이밍", "랜덤"))
         background = self._select_item("배경/장소", selected_options.get("배경/장소", "랜덤"))
         expression = self._select_item("상황/표정", selected_options.get("상황/표정", "랜덤"))
         lighting = self._select_item("촬영/조명", selected_options.get("촬영/조명", "랜덤"))
-        
+
         # 3. 주제제 설명 구성
-        subject = self._build_subject_description(gender, race, skin, adjective)
-        
+        subject = self._build_subject_description(gender, race, skin, adjective, shot)
+
         # 4. 외모 설명 구성
-        appearance_parts = self._build_appearance_description(hair, clothing, body_type)
-        
+        appearance_parts = self._build_appearance_description(hair, clothing, body_type, allow_modifiers)
+
         # 5. 장면 설명 구성
         scene_parts = self._build_scene_description(pose, background, expression, lighting)
-        
+
         # 6. 전체 프롬프트 조합
         all_parts = [subject] + appearance_parts + scene_parts
         all_parts = [p for p in all_parts if p]  # 빈 문자열 제거
-        
+
         # 7. 품질 프리픽스/서픽스 선택
         prefix_key = self.mode
         suffix_key = self.mode
-        
+
         if style == "anime":
             # anime_sfw 또는 anime_nsfw 키 사용
             prefix_key = f"anime_{self.mode}"
             suffix_key = f"anime_{self.mode}"
-            
+
             # 키가 없는 경우 안전장치 (기본 sfw)
             if prefix_key not in QUALITY_PREFIXES:
                 prefix_key = "anime_sfw"
             if suffix_key not in QUALITY_SUFFIXES:
                 suffix_key = "anime_sfw"
-        
-        prefix = random.choice(QUALITY_PREFIXES.get(prefix_key, QUALITY_PREFIXES["sfw"]))
+        elif natural:
+            # 과장된 품질 수식구 대신 담백한 자연 사진 표현 사용
+            prefix_key = "natural"
+            suffix_key = "natural"
+
+        prefix = (
+            random.choice(QUALITY_PREFIXES.get(prefix_key, QUALITY_PREFIXES["sfw"]))
+            if use_quality_prefix
+            else ""
+        )
         suffix = random.choice(QUALITY_SUFFIXES.get(suffix_key, QUALITY_SUFFIXES["sfw"]))
-        
+
         # 8. 최종 프롬프트 구성
         main_description = ", ".join(all_parts)
-        
+
         # 사용자 요구사항 적용
         main_description = self._apply_user_requirements(main_description, user_requirements)
-        
-        positive_prompt = f"{prefix} {main_description}, {suffix}"
-        
-        # 9. 네거티브 프롬프트 선택
-        negative_prompt = NEGATIVE_PROMPTS["standard"]
-        
+
+        positive_prompt = f"{prefix} {main_description}, {suffix}".strip()
+
+        # 9. 자연스러움 지시문 부착
+        if natural and include_natural_directives:
+            positive_prompt = attach_natural_directives(
+                positive_prompt, natural_directive_keys
+            )
+
+        # 10. 네거티브 프롬프트 선택
+        negative_prompt = (
+            NEGATIVE_PROMPTS["natural"] if natural else NEGATIVE_PROMPTS["standard"]
+        )
+
         return positive_prompt, negative_prompt
     
     def generate_with_ollama(
@@ -232,30 +294,50 @@ class PromptGenerator:
         user_requirements: Optional[str],
         ollama_client,
         model_name: str,
-        style: str = "photorealistic"
+        style: str = "photorealistic",
+        use_modifiers: bool = True,
+        use_quality_prefix: bool = True,
+        use_natural_photo: bool = False,
+        natural_directive_keys: Optional[List[str]] = None
     ) -> Tuple[str, str]:
         """
         Ollama 모델을 사용한 프롬프트 생성
-        
+
         기본 생성된 프롬프트를 Ollama 모델로 개선합니다.
+        자연스러운 사진 모드에서는 지시문 블록을 개선 대상에서 제외하고
+        개선이 끝난 뒤 원문 그대로 다시 부착합니다.
         """
-        # 기본 프롬프트 생성
-        base_positive, base_negative = self.generate(selected_options, user_requirements, style=style)
-        
+        natural = use_natural_photo and style == "photorealistic"
+
+        # 기본 프롬프트 생성 (지시문은 개선 후 부착)
+        base_positive, base_negative = self.generate(
+            selected_options,
+            user_requirements,
+            style=style,
+            use_modifiers=use_modifiers,
+            use_quality_prefix=use_quality_prefix,
+            use_natural_photo=use_natural_photo,
+            include_natural_directives=False,
+        )
+
+        def finalize(prompt: str) -> str:
+            if not natural:
+                return prompt
+            return attach_natural_directives(prompt, natural_directive_keys)
+
         # Ollama로 개선 요청
-        style_desc = "photorealistic" if style == "photorealistic" else "high-quality anime style"
-        
-        system_prompt = f"""You are a world-class prompt engineer specializing in {style_desc} AI image generation.
-Your task is to enhance and refine the given prompt while:
-1. Maintaining natural, flowing English
-2. Keeping technical details accurate for the target style ({style})
-3. Ensuring coherent visual storytelling
-4. Preserving the original intent and style
-5. Adding subtle details that enhance quality
+        system_prompt = build_enhancement_system_prompt(style, natural)
 
-IMPORTANT: Return ONLY the enhanced prompt, no explanations or additional text."""
+        if natural:
+            user_prompt = f"""Rewrite this image generation prompt so it reads like a real photograph:
 
-        user_prompt = f"""Enhance this image generation prompt for maximum quality and natural flow:
+Original prompt: {base_positive}
+
+Requirements: {user_requirements if user_requirements else "None specified"}
+
+Return the rewritten prompt only."""
+        else:
+            user_prompt = f"""Enhance this image generation prompt for maximum quality and natural flow:
 
 Original prompt: {base_positive}
 
@@ -272,16 +354,16 @@ Return the enhanced prompt only."""
                 ]
             )
             enhanced_prompt = response['message']['content'].strip()
-            
+
             # 응답이 너무 짧거나 이상한 경우 기본값 사용
             if len(enhanced_prompt) < 50 or enhanced_prompt.startswith("I "):
-                return base_positive, base_negative
-            
-            return enhanced_prompt, base_negative
-            
+                return finalize(base_positive), base_negative
+
+            return finalize(enhanced_prompt), base_negative
+
         except Exception as e:
             print(f"Ollama enhancement failed: {e}")
-            return base_positive, base_negative
+            return finalize(base_positive), base_negative
 
 
 class PromptVariationGenerator:

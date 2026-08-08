@@ -14,10 +14,16 @@ sys.path.insert(0, APP_DIR)
 from data.prompt_database import (
     DATA,
     CATEGORY_LABELS,
+    NATURAL_DIRECTIVE_KEYS,
+    NATURAL_PHOTO_DIRECTIVES,
     get_category_options,
     NEGATIVE_PROMPTS,
 )
-from core.prompt_engine import PromptGenerator, create_generator
+from core.prompt_engine import (
+    PromptGenerator,
+    attach_natural_directives,
+    create_generator,
+)
 from integrations.ollama_integration import (
     OllamaClient,
     PromptEnhancer,
@@ -150,6 +156,14 @@ if "chk_llm_enhance" not in st.session_state:
     st.session_state.chk_llm_enhance = False
 if "chk_llm_translate" not in st.session_state:
     st.session_state.chk_llm_translate = False
+if "use_modifiers" not in st.session_state:
+    st.session_state.use_modifiers = True
+if "use_quality_prefix" not in st.session_state:
+    st.session_state.use_quality_prefix = True
+if "use_natural_photo" not in st.session_state:
+    st.session_state.use_natural_photo = True
+if "natural_directive_keys" not in st.session_state:
+    st.session_state.natural_directive_keys = list(NATURAL_DIRECTIVE_KEYS)
 
 
 with st.sidebar:
@@ -176,6 +190,48 @@ with st.sidebar:
         index=0 if st.session_state.style == "photorealistic" else 1,
     )
     st.session_state.style = style_options[selected_style_label]
+
+    st.checkbox(
+        "기본 Modifiers 사용",
+        key="use_modifiers",
+        help="끄면 형용사/피부질감/상태/의상재질 수식어가 프롬프트에서 제외됩니다.",
+    )
+
+    st.checkbox(
+        "품질 프리픽스 사용",
+        key="use_quality_prefix",
+        help="끄면 프롬프트 앞부분의 품질 수식구(QUALITY_PREFIXES)가 제외됩니다.",
+    )
+
+    st.markdown("---")
+
+    # 자연스러운 사진 모드
+    st.markdown("### 📷 자연스러운 사진 모드")
+    st.checkbox(
+        "AI 티 제거 지시문 적용",
+        key="use_natural_photo",
+        help=(
+            "실사 스타일에서만 적용됩니다. 과장 수식어와 8K/HDR 같은 문구를 배제하고, "
+            "화이트밸런스·렌즈 심도·재질감·광원 일관성 지시문을 붙입니다. "
+            "LLM 개선 단계도 살을 붙이지 않고 다듬는 방식으로 바뀝니다."
+        ),
+    )
+
+    if st.session_state.use_natural_photo:
+        if st.session_state.style != "photorealistic":
+            st.caption("⚠️ 애니메이션 스타일에서는 적용되지 않습니다.")
+
+        st.multiselect(
+            "적용할 지시문",
+            options=NATURAL_DIRECTIVE_KEYS,
+            key="natural_directive_keys",
+            help="필요한 항목만 골라 프롬프트 길이를 조절할 수 있습니다.",
+        )
+
+        with st.expander("지시문 내용 보기"):
+            for _key in st.session_state.natural_directive_keys:
+                st.markdown(f"**{_key}**")
+                st.caption(NATURAL_PHOTO_DIRECTIVES[_key])
 
     st.markdown("---")
 
@@ -323,7 +379,7 @@ with tab1:
             options = get_category_options(category, st.session_state.mode)
             display_label = f"{category} ({CATEGORY_LABELS.get(category, category)})"
             selected_configs[category] = st.selectbox(
-                display_label, options=["랜덤", "제외"] + options, key=f"c_{i}"
+                display_label, options=["랜덤", "제외"] + options, key=f"c_{category}"
             )
 
     st.markdown("---")
@@ -389,13 +445,38 @@ with tab1:
                     f"[옵션] 선택된 LLM: {selected_llm if selected_llm else '없음'}"
                 )
 
-            # 1. 기본 프롬프트 생성
+            # 자연스러운 사진 모드는 실사 스타일에서만 적용
+            natural_photo = (
+                st.session_state.use_natural_photo
+                and st.session_state.style == "photorealistic"
+            )
+            natural_keys = (
+                st.session_state.natural_directive_keys if natural_photo else None
+            )
+            process_logs.append(
+                f"[옵션] 자연스러운 사진 모드: {natural_photo}"
+                + (f" - 지시문 {len(natural_keys)}개" if natural_photo else "")
+            )
+
+            # 1. 기본 프롬프트 생성 (지시문은 LLM 개선 후 부착)
             st.write("📝 기본 프롬프트 생성 중...")
             generator = create_generator(st.session_state.mode)
             english_prompt, negative_prompt = generator.generate(
-                selected_configs, user_requirements, style=st.session_state.style
+                selected_configs,
+                user_requirements,
+                style=st.session_state.style,
+                use_modifiers=st.session_state.use_modifiers,
+                use_quality_prefix=st.session_state.use_quality_prefix,
+                use_natural_photo=natural_photo,
+                natural_directive_keys=natural_keys,
+                include_natural_directives=False,
             )
-            original_prompt = english_prompt  # 개선 전 원본 저장
+            # 개선 전 원본은 지시문까지 붙인 완성형으로 저장 (개선 결과와 비교용)
+            original_prompt = (
+                attach_natural_directives(english_prompt, natural_keys)
+                if natural_photo
+                else english_prompt
+            )
             process_logs.append(f"[기본 생성] 완료 - 스타일: {st.session_state.style}, 길이: {len(english_prompt)}자")
             st.write(f"✅ 기본 프롬프트 생성 완료 ({len(english_prompt)}자)")
 
@@ -417,7 +498,10 @@ with tab1:
                             f"[LLM 개선] Ollama 모델: {st.session_state.selected_ollama_model}"
                         )
                         english_prompt = enhancer.enhance_prompt(
-                            english_prompt, user_requirements=user_requirements, style=st.session_state.style
+                            english_prompt,
+                            user_requirements=user_requirements,
+                            style=st.session_state.style,
+                            natural_photo=natural_photo,
                         )
                         llm_enhanced = True
                         enhanced_by = (
@@ -434,7 +518,10 @@ with tab1:
                             f"[LLM 개선] 외부LLM 모델: {st.session_state.external_llm_model}"
                         )
                         english_prompt = enhancer.enhance_prompt(
-                            english_prompt, user_requirements=user_requirements, style=st.session_state.style
+                            english_prompt,
+                            user_requirements=user_requirements,
+                            style=st.session_state.style,
+                            natural_photo=natural_photo,
                         )
                         llm_enhanced = True
                         enhanced_by = st.session_state.external_llm_model
@@ -499,6 +586,22 @@ with tab1:
                 process_logs.append("[번역] LLM 미연결 - 번역 생략")
                 st.write("⏭️ 번역 생략 (LLM 미연결)")
 
+            # 4. 자연스러움 지시문 부착
+            # LLM 개선/번역이 끝난 뒤 붙여 지시문이 요약·변형되지 않도록 함
+            if natural_photo:
+                before_length = len(english_prompt)
+                english_prompt = attach_natural_directives(
+                    english_prompt, natural_keys
+                )
+                if len(english_prompt) > before_length:
+                    process_logs.append(
+                        f"[자연스러움 지시문] {len(natural_keys)}개 부착 - "
+                        f"길이: {before_length}자 → {len(english_prompt)}자"
+                    )
+                    st.write(f"✅ 자연스러움 지시문 {len(natural_keys)}개 부착")
+                else:
+                    process_logs.append("[자연스러움 지시문] 선택된 항목 없음 - 생략")
+
             status.update(label="✅ 생성 완료!", state="complete", expanded=False)
 
         # 처리 로그를 세션에 저장
@@ -510,6 +613,7 @@ with tab1:
             "korean": korean_prompt,
             "negative": negative_prompt,
             "enhanced_by": enhanced_by,
+            "natural_photo": natural_photo,
         }
 
         if save_history:
@@ -537,6 +641,11 @@ with tab1:
             f'<div class="translated-box">{st.session_state.last_prompt["korean"]}</div>',
             unsafe_allow_html=True,
         )
+        if st.session_state.last_prompt.get("natural_photo"):
+            st.caption(
+                "자연스러움 지시문은 매번 동일한 고정 문구이므로 번역에서 제외했습니다. "
+                "내용은 사이드바에서 확인할 수 있습니다."
+            )
 
         # 2. 개선 전 원본 프롬프트 (LLM 개선 사용 시에만 표시)
         if st.session_state.last_prompt.get(
@@ -546,12 +655,10 @@ with tab1:
                 '<span class="prompt-label">📄 Original Prompt (Before Enhancement)</span>',
                 unsafe_allow_html=True,
             )
-            st.text_area(
-                "원본",
-                value=st.session_state.last_prompt["original"],
-                height=100,
-                label_visibility="collapsed",
-                key="original_prompt",
+            # key 있는 위젯은 세션 상태 값이 고착되어 재생성 시 갱신되지 않으므로
+            # 표시 전용 렌더러 사용
+            render_copyable_prompt(
+                st.session_state.last_prompt["original"], "original", height=140
             )
 
         # 3. 영문 프롬프트
@@ -603,7 +710,22 @@ with tab2:
 
 with tab3:
     st.markdown(
-        "### 사용 가이드\n1. 사용할 LLM 모델 선택 및 연결 (LLM API키 설정 필요)\n2. 세부 카테고리 취사 선택\n3. 생성 버튼을 누르면 최종 영문 프롬프트와 참고용 한국어 번역본이 생성됨"
+        "### 사용 가이드\n"
+        "1. 사용할 LLM 모델 선택 및 연결 (LLM API키 설정 필요)\n"
+        "2. 세부 카테고리 취사 선택\n"
+        "3. 생성 버튼을 누르면 최종 영문 프롬프트와 참고용 한국어 번역본이 생성됨\n"
+        "\n"
+        "### 자연스러운 사진 모드\n"
+        "AI가 만든 티가 나지 않는 결과를 얻기 위한 옵션. 실사 스타일에서만 적용됨.\n"
+        "- 과장 형용사, 인공적인 피부 표현, 8K/HDR/리터칭 류의 품질 수식구를 프롬프트에서 배제함\n"
+        "- 화이트밸런스, 렌즈 심도, 재질감, 광원 일관성 등의 지시문을 프롬프트 끝에 덧붙임\n"
+        "- LLM 개선 단계가 살을 붙이는 방식에서 덜어내며 다듬는 방식으로 바뀜\n"
+        "- 지시문은 LLM 개선이 끝난 뒤 원문 그대로 붙으므로 요약·변형되지 않음\n"
+        "- 네거티브 프롬프트도 AI 티가 나는 후처리를 억제하는 항목으로 교체됨\n"
+        "\n"
+        "### 샷/프레이밍\n"
+        "인물의 어느 부위까지 담을지 지정하는 카테고리. "
+        "증명사진용 상반신 정면, 헤드샷, 전신샷 등을 선택할 수 있음."
     )
 
 st.markdown("---")

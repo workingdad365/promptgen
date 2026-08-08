@@ -2,6 +2,10 @@ import requests
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 from utils.logger import log_llm_interaction
+from data.llm_prompts import (
+    TRANSLATION_SYSTEM_PROMPT,
+    build_enhancement_system_prompt,
+)
 
 
 @dataclass
@@ -170,33 +174,6 @@ class OllamaClient:
 
 
 class PromptEnhancer:
-    ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE = """You are an expert prompt engineer for {style_desc} AI image generation models like Stable Diffusion and Flux.
- 
- Your role is to enhance image generation prompts to be:
- 1. More natural and flowing in English
- 2. More detailed and specific
- 3. Better structured for optimal model interpretation
- 4. Consistent in style and tone
- 
- Rules:
- - Keep the enhanced prompt concise but detailed
- - Maintain all key elements from the original
- - Use professional {term_type} terminology
- - Ensure natural language flow
- - DO NOT add explanations, just return the enhanced prompt
- - DO NOT change the core subject or theme"""
-
-    TRANSLATION_SYSTEM_PROMPT = """You are a professional translator specializing in creative and technical content.
-
-Translate the given image generation prompt from English to Korean.
-
-Rules:
-- Maintain all technical photography terms
-- Keep the natural flow of the description
-- Preserve the artistic intent
-- DO NOT add explanations
-- Return ONLY the Korean translation"""
-
     def __init__(self, ollama_client: OllamaClient):
         self.client = ollama_client
         self.default_model = None
@@ -210,19 +187,27 @@ Rules:
         original_prompt: str,
         model: Optional[str] = None,
         user_requirements: Optional[str] = None,
-        style: str = "photorealistic"
+        style: str = "photorealistic",
+        natural_photo: bool = False
     ) -> str:
+        """
+        프롬프트 개선
+
+        Args:
+            natural_photo: 자연스러운 사진 모드 (살 붙이기를 억제하고 AI 티 어휘를 제거)
+        """
         model = model or self.default_model
         if not model:
             raise ValueError("모델이 지정되지 않았습니다.")
 
-        user_content = f"Enhance this prompt:\n{original_prompt}"
+        if natural_photo and style == "photorealistic":
+            user_content = f"Rewrite this prompt:\n{original_prompt}"
+        else:
+            user_content = f"Enhance this prompt:\n{original_prompt}"
         if user_requirements:
             user_content += f"\n\nAdditional requirements: {user_requirements}"
 
-        style_desc = "photorealistic" if style == "photorealistic" else "high-quality anime style"
-        term_type = "photography" if style == "photorealistic" else "anime art"
-        system_prompt = self.ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE.format(style_desc=style_desc, term_type=term_type)
+        system_prompt = build_enhancement_system_prompt(style, natural_photo)
 
         try:
             response = self.client.chat(
@@ -249,7 +234,7 @@ Rules:
             response = self.client.chat(
                 model=model,
                 messages=[
-                    {"role": "system", "content": self.TRANSLATION_SYSTEM_PROMPT},
+                    {"role": "system", "content": TRANSLATION_SYSTEM_PROMPT},
                     {"role": "user", "content": english_prompt},
                 ],
                 temperature=0.3,  # 번역은 낮은 온도로

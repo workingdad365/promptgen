@@ -1,3 +1,5 @@
+from typing import Optional
+
 MODIFIERS = {
     "형용사": {
         "positive": [
@@ -250,7 +252,22 @@ DATA = {
             "친밀한 클로즈업 자세": "intimate close-up position"
         }
     },
-    
+
+    "샷/프레이밍": {
+        "얼굴 극단 클로즈업": "extreme close-up portrait",
+        "얼굴 클로즈업": "close-up face portrait",
+        "헤드샷 (얼굴·어깨)": "headshot",
+        "증명사진 (상반신 정면)": "front-facing upper body ID photo",
+        "상반신 (가슴 위)": "medium shot framed from the chest up",
+        "상반신 (허리 위)": "waist-up shot",
+        "옆모습 상반신": "upper body profile shot",
+        "카우보이 샷 (허벅지 위)": "cowboy shot framed from mid-thigh up",
+        "무릎 위 샷": "medium long shot framed above the knees",
+        "전신샷": "full body shot",
+        "전신 원경 (배경 포함)": "wide full body shot showing the surroundings",
+        "뒷모습 샷": "shot from behind"
+    },
+
     "배경/장소": {
         "sfw": {
             "미니멀 모던 스튜디오": "minimalist modern studio",
@@ -393,6 +410,13 @@ QUALITY_PREFIXES = {
         "Detailed anime illustration, sensual gaze,",
         "Alluring anime character art,",
         "Mature anime style, cel shaded,"
+    ],
+    # 자연스러운 사진 모드용 - 과장된 품질 수식구를 배제한 담백한 프리픽스
+    "natural": [
+        "Candid photograph,",
+        "Everyday photograph,",
+        "Natural-light photograph,",
+        "Unposed photo,"
     ]
 }
 
@@ -433,8 +457,57 @@ QUALITY_SUFFIXES = {
 
         "cel shading, sensual lighting, expressive eyes, wet skin texture, "
         "detailed anatomy, highres, 4k, fanbox quality"
+    ],
+    # 자연스러운 사진 모드용 - 8K/HDR/리터칭 같은 AI 티 유발 문구를 배제
+    "natural": [
+        "natural skin texture, believable available light, straight-out-of-camera look",
+        "unretouched skin, honest tonality, minimally processed camera file",
+        "real photographic texture, restrained color grading, no retouching"
     ]
 }
+
+# 자연스러운 사진 지시문
+# 값은 그대로 프롬프트에 붙는 영문 지시문이며, 키는 UI 표시용 한글 라벨
+NATURAL_PHOTO_DIRECTIVES = {
+    "색감·화이트밸런스": (
+        "Neutral white balance around 5000-5500K daylight. No orange, yellow or teal "
+        "color cast and no unrealistic color contrast; skin, clothing and background "
+        "keep their true-to-life colors. Saturation and contrast stay restrained, "
+        "graded as calmly as a real camera file."
+    ),
+    "렌즈·심도": (
+        "Rendered as if shot on a 50mm lens at f/1.8-f/2.8: sharp focus on the subject's "
+        "key features, with foreground and background falling off gradually and softly "
+        "with distance. Optical depth of field rather than an applied blur filter, "
+        "and no aggressive sharpening halos."
+    ),
+    "피부·재질감": (
+        "Physically real materials. Skin keeps visible pores, fine texture, stray hairs "
+        "and subtle tonal variation instead of plastic smoothness. Metal reflects, glass "
+        "transmits and reflects, fabric shows weave and small creases, wood and stone keep "
+        "their own grain. No uniformly glossy surfaces."
+    ),
+    "빛·그림자 일관성": (
+        "One clearly defined key light for the whole scene, with every highlight and shadow "
+        "following that same light direction across face, clothing, props and background. "
+        "Shadow density and edge softness vary naturally with distance and light size, "
+        "and contact shadows ground the subject in the space."
+    ),
+    "우연히 촬영된 자연스러움": (
+        "Reads like a real moment someone actually caught on a camera or phone rather than "
+        "a polished studio render. Posture and expression stay relaxed and slightly "
+        "asymmetric instead of perfectly composed, and hair, clothing folds and small "
+        "background details keep realistic minor imperfections."
+    ),
+    "최종 마무리·AI 티 제거": (
+        "Final pass: drop anything that does not serve the main subject, hold back "
+        "saturation, contrast, sharpening and HDR, keep highlights from clipping, and let "
+        "shadows stay soft and directionally correct. Natural photographic tonality "
+        "instead of artificial perfection."
+    )
+}
+
+NATURAL_DIRECTIVE_KEYS = list(NATURAL_PHOTO_DIRECTIVES.keys())
 
 NEGATIVE_PROMPTS = {
     "standard": (
@@ -454,20 +527,54 @@ NEGATIVE_PROMPTS = {
         "deformed body, bad anatomy, wrong proportions, extra limbs, missing limbs, "
         "floating limbs, disconnected body parts, mutation, ugly, disgusting, "
         "poorly drawn, blurry, low quality, watermark, text"
+    ),
+    # 자연스러운 사진 모드용 - AI 티가 나는 후처리/재질 표현을 집중 억제
+    "natural": (
+        "deformed, distorted, disfigured, bad anatomy, wrong anatomy, extra limb, "
+        "missing limb, mutated hands and fingers, watermark, text, signature, cropped, "
+        "plastic skin, waxy skin, poreless airbrushed skin, over-smoothed skin, "
+        "oversaturated, oversharpened, sharpening halos, HDR, tone-mapped, "
+        "orange and teal color cast, unrealistic color contrast, "
+        "blown-out highlights, crushed blacks, heavy vignette, "
+        "artificial background blur, uniform glossy surfaces, "
+        "inconsistent light directions, missing contact shadow, floating subject, "
+        "perfectly symmetrical face, overly retouched, beauty filter, "
+        "3d render, cgi, digital art, illustration, airbrushed"
     )
 }
 
 CATEGORY_LABELS = {
     "나이/성별": "Age/Gender",
-    "인종/외모": "Ethnicity/Appearance", 
+    "인종/외모": "Ethnicity/Appearance",
     "헤어스타일": "Hairstyle",
     "의상": "Clothing",
     "몸매/체형": "Body Type",
     "포즈/행동": "Pose/Action",
+    "샷/프레이밍": "Shot/Framing",
     "배경/장소": "Background/Location",
     "상황/표정": "Mood/Expression",
     "촬영/조명": "Photography/Lighting"
 }
+
+
+def build_natural_directives(keys: Optional[list] = None) -> str:
+    """
+    자연스러운 사진 지시문 블록 생성
+
+    Args:
+        keys: 포함할 지시문 키 목록 (None 이면 전체)
+
+    Returns:
+        프롬프트에 덧붙일 지시문 블록 (선택된 항목이 없으면 빈 문자열)
+    """
+    selected = NATURAL_DIRECTIVE_KEYS if keys is None else [
+        k for k in NATURAL_DIRECTIVE_KEYS if k in keys
+    ]
+    if not selected:
+        return ""
+
+    lines = [f"- {NATURAL_PHOTO_DIRECTIVES[k]}" for k in selected]
+    return "Photographic direction:\n" + "\n".join(lines)
 
 def get_category_options(category: str, mode: str = "sfw") -> list:
     """카테고리별 옵션 리스트 반환 (한글 키 목록)"""
