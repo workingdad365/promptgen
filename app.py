@@ -24,6 +24,7 @@ from core.prompt_engine import (
     attach_natural_directives,
     create_generator,
 )
+from data.llm_prompts import PROMPT_TARGETS
 from integrations.ollama_integration import (
     OllamaClient,
     PromptEnhancer,
@@ -38,7 +39,7 @@ from integrations.external_llm_integration import (
 )
 from integrations.model_config import ModelConfigError
 from utils.history_manager import get_history_manager
-from utils.settings_manager import get_last_external_model, set_last_external_model
+from utils.settings_manager import load_settings, save_settings
 
 st.set_page_config(
     page_title="Prompt Generator for Images",
@@ -122,30 +123,43 @@ def render_copyable_prompt(text: str, element_id: str, height: int = 200) -> Non
     )
 
 
+SAVED_SETTINGS = load_settings()
+
 if "mode" not in st.session_state:
-    st.session_state.mode = "sfw"
+    st.session_state.mode = SAVED_SETTINGS["mode"]
 if "style" not in st.session_state:
-    st.session_state.style = "photorealistic"
+    st.session_state.style = SAVED_SETTINGS["style"]
+if "prompt_target" not in st.session_state:
+    saved_target = SAVED_SETTINGS["prompt_target"]
+    st.session_state.prompt_target = (
+        saved_target if saved_target in PROMPT_TARGETS else "legacy"
+    )
 if "generator" not in st.session_state:
-    st.session_state.generator = create_generator("sfw")
+    st.session_state.generator = create_generator(st.session_state.mode)
 if "ollama_client" not in st.session_state:
     st.session_state.ollama_client = None
 if "ollama_connected" not in st.session_state:
     st.session_state.ollama_connected = False
 if "selected_ollama_model" not in st.session_state:
-    st.session_state.selected_ollama_model = None
+    st.session_state.selected_ollama_model = SAVED_SETTINGS["last_ollama_model"]
+if "ollama_host" not in st.session_state:
+    st.session_state.ollama_host = SAVED_SETTINGS["ollama_host"]
 if "external_llm_client" not in st.session_state:
     st.session_state.external_llm_client = None
 if "external_llm_connected" not in st.session_state:
     st.session_state.external_llm_connected = False
 if "external_llm_model" not in st.session_state:
     st.session_state.external_llm_model = (
-        get_last_external_model() if EXTERNAL_LLM_MODELS else None
+        SAVED_SETTINGS["last_external_model"] if EXTERNAL_LLM_MODELS else None
     )
     if st.session_state.external_llm_model not in EXTERNAL_LLM_MODELS:
         st.session_state.external_llm_model = (
             EXTERNAL_LLM_MODELS[0] if EXTERNAL_LLM_MODELS else None
         )
+if "user_requirements_input" not in st.session_state:
+    st.session_state.user_requirements_input = SAVED_SETTINGS["last_user_requirements"]
+if "save_history" not in st.session_state:
+    st.session_state.save_history = SAVED_SETTINGS["save_history"]
 if "history_manager" not in st.session_state:
     st.session_state.history_manager = get_history_manager()
 if "last_prompt" not in st.session_state:
@@ -157,13 +171,19 @@ if "chk_llm_enhance" not in st.session_state:
 if "chk_llm_translate" not in st.session_state:
     st.session_state.chk_llm_translate = False
 if "use_modifiers" not in st.session_state:
-    st.session_state.use_modifiers = True
+    st.session_state.use_modifiers = SAVED_SETTINGS["use_modifiers"]
 if "use_quality_prefix" not in st.session_state:
-    st.session_state.use_quality_prefix = True
+    st.session_state.use_quality_prefix = SAVED_SETTINGS["use_quality_prefix"]
 if "use_natural_photo" not in st.session_state:
-    st.session_state.use_natural_photo = True
+    st.session_state.use_natural_photo = SAVED_SETTINGS["use_natural_photo"]
 if "natural_directive_keys" not in st.session_state:
-    st.session_state.natural_directive_keys = list(NATURAL_DIRECTIVE_KEYS)
+    saved_keys = SAVED_SETTINGS["natural_directive_keys"]
+    if isinstance(saved_keys, list):
+        st.session_state.natural_directive_keys = [
+            k for k in saved_keys if k in NATURAL_DIRECTIVE_KEYS
+        ]
+    else:
+        st.session_state.natural_directive_keys = list(NATURAL_DIRECTIVE_KEYS)
 
 
 with st.sidebar:
@@ -190,6 +210,22 @@ with st.sidebar:
         index=0 if st.session_state.style == "photorealistic" else 1,
     )
     st.session_state.style = style_options[selected_style_label]
+
+    st.markdown("### 🧩 프롬프트 방식")
+    target_keys = list(PROMPT_TARGETS.keys())
+    selected_target = st.radio(
+        "대상 이미지 모델",
+        options=target_keys,
+        format_func=lambda k: PROMPT_TARGETS[k],
+        index=target_keys.index(st.session_state.prompt_target),
+        help=(
+            "레거시: 키워드를 나열하는 태그형 프롬프트로 개선합니다. "
+            "최신 모델: 지시문을 이해하는 모델에 맞춰 자연어 문장형으로 재작성하고 "
+            "8K/masterpiece 같은 품질 태그를 제거합니다. "
+            "LLM 개선 단계에서만 적용됩니다."
+        ),
+    )
+    st.session_state.prompt_target = selected_target
 
     st.checkbox(
         "기본 Modifiers 사용",
@@ -252,7 +288,6 @@ with st.sidebar:
             st.session_state.external_llm_client = None
             st.session_state.external_llm_connected = False
         st.session_state.external_llm_model = selected_model
-        set_last_external_model(selected_model)
 
         st.caption(f"제공자: {get_provider_label(selected_model)}")
 
@@ -303,7 +338,7 @@ with st.sidebar:
 
     # Ollama 연동
     st.markdown("### 🤖 Ollama 연동")
-    ollama_host = st.text_input("Ollama 서버 주소", value="http://localhost:11434")
+    ollama_host = st.text_input("Ollama 서버 주소", key="ollama_host")
 
     ollama_msg = None
     ollama_msg_type = None
@@ -342,8 +377,14 @@ with st.sidebar:
     if st.session_state.ollama_connected:
         models = st.session_state.ollama_client.get_model_names()
         if models:
+            saved_ollama_model = st.session_state.selected_ollama_model
             st.session_state.selected_ollama_model = st.selectbox(
-                "모델 선택", options=models, key="ollama_model_select"
+                "모델 선택",
+                options=models,
+                index=models.index(saved_ollama_model)
+                if saved_ollama_model in models
+                else 0,
+                key="ollama_model_select",
             )
 
     st.markdown("---")
@@ -366,6 +407,7 @@ with tab1:
         "💡 사용자 요구사항 (선택)",
         placeholder="예: 'cyberpunk aesthetic with neon lights'...",
         height=80,
+        key="user_requirements_input",
     )
 
     st.markdown("---")
@@ -373,13 +415,22 @@ with tab1:
     selected_configs = {}
     cols = st.columns(3)
     categories = list(DATA.keys())
+    saved_categories = SAVED_SETTINGS["category_selections"]
+    if not isinstance(saved_categories, dict):
+        saved_categories = {}
 
     for i, category in enumerate(categories):
         with cols[i % 3]:
-            options = get_category_options(category, st.session_state.mode)
+            options = ["랜덤", "제외"] + get_category_options(
+                category, st.session_state.mode
+            )
             display_label = f"{category} ({CATEGORY_LABELS.get(category, category)})"
+            widget_key = f"c_{category}"
+            # 모드 변경 등으로 저장된 값이 옵션에 없으면 랜덤으로 되돌림
+            current = st.session_state.get(widget_key, saved_categories.get(category))
+            st.session_state[widget_key] = current if current in options else "랜덤"
             selected_configs[category] = st.selectbox(
-                display_label, options=["랜덤", "제외"] + options, key=f"c_{category}"
+                display_label, options=options, key=widget_key
             )
 
     st.markdown("---")
@@ -416,7 +467,7 @@ with tab1:
             selected_llm = None
             st.caption("⚠️ LLM 미연결 - 개선/번역 비활성화")
 
-        save_history = st.checkbox("💾 저장", value=True)
+        save_history = st.checkbox("💾 저장", key="save_history")
 
     with col_gen:
         generate_clicked = st.button(
@@ -425,6 +476,7 @@ with tab1:
 
     if generate_clicked:
         st.session_state.prompt_counter += 1
+        save_settings({"last_user_requirements": user_requirements})
 
         # 처리 로그 저장용
         process_logs = []
@@ -456,6 +508,10 @@ with tab1:
             process_logs.append(
                 f"[옵션] 자연스러운 사진 모드: {natural_photo}"
                 + (f" - 지시문 {len(natural_keys)}개" if natural_photo else "")
+            )
+            prompt_target = st.session_state.prompt_target
+            process_logs.append(
+                f"[옵션] 프롬프트 방식: {PROMPT_TARGETS[prompt_target]}"
             )
 
             # 1. 기본 프롬프트 생성 (지시문은 LLM 개선 후 부착)
@@ -502,6 +558,7 @@ with tab1:
                             user_requirements=user_requirements,
                             style=st.session_state.style,
                             natural_photo=natural_photo,
+                            prompt_target=prompt_target,
                         )
                         llm_enhanced = True
                         enhanced_by = (
@@ -522,6 +579,7 @@ with tab1:
                             user_requirements=user_requirements,
                             style=st.session_state.style,
                             natural_photo=natural_photo,
+                            prompt_target=prompt_target,
                         )
                         llm_enhanced = True
                         enhanced_by = st.session_state.external_llm_model
@@ -715,6 +773,13 @@ with tab3:
         "2. 세부 카테고리 취사 선택\n"
         "3. 생성 버튼을 누르면 최종 영문 프롬프트와 참고용 한국어 번역본이 생성됨\n"
         "\n"
+        "### 프롬프트 방식\n"
+        "LLM 개선 단계에서 어떤 형태의 프롬프트를 만들지 정하는 옵션.\n"
+        "- 레거시: Stable Diffusion/Flux 계열에 맞춰 키워드를 나열하는 태그형으로 개선함\n"
+        "- 최신 모델: GPT-Image, Nano Banana처럼 지시문을 이해하는 모델에 맞춰 "
+        "자연어 문장으로 재작성하고 8K/masterpiece 같은 품질 태그와 가중치 문법을 제거함\n"
+        "- 자연스러운 사진 모드가 켜져 있으면 그쪽 지시문이 우선 적용됨\n"
+        "\n"
         "### 자연스러운 사진 모드\n"
         "AI가 만든 티가 나지 않는 결과를 얻기 위한 옵션. 실사 스타일에서만 적용됨.\n"
         "- 과장 형용사, 인공적인 피부 표현, 8K/HDR/리터칭 류의 품질 수식구를 프롬프트에서 배제함\n"
@@ -732,4 +797,25 @@ st.markdown("---")
 st.markdown(
     '<div style="text-align:center; color:grey; font-size:0.8rem;">Prompt Generator for Images</div>',
     unsafe_allow_html=True,
+)
+
+# 렌더링이 끝난 시점의 설정을 파일에 반영 (변경분이 있을 때만 기록)
+save_settings(
+    {
+        "mode": st.session_state.mode,
+        "style": st.session_state.style,
+        "prompt_target": st.session_state.prompt_target,
+        "use_modifiers": st.session_state.use_modifiers,
+        "use_quality_prefix": st.session_state.use_quality_prefix,
+        "use_natural_photo": st.session_state.use_natural_photo,
+        "natural_directive_keys": list(st.session_state.natural_directive_keys),
+        "last_external_model": st.session_state.external_llm_model,
+        "ollama_host": st.session_state.ollama_host,
+        "last_ollama_model": st.session_state.selected_ollama_model,
+        "save_history": st.session_state.save_history,
+        "category_selections": {
+            category: st.session_state.get(f"c_{category}", "랜덤")
+            for category in DATA
+        },
+    }
 )

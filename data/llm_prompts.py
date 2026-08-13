@@ -1,5 +1,12 @@
 """LLM 개선/번역에 사용하는 시스템 프롬프트 모음"""
 
+# 프롬프트 타겟: legacy = SD/Flux 계열 태그 나열형, modern = 지시문 이해형 최신 모델
+PROMPT_TARGETS = {
+    "legacy": "레거시 (Stable Diffusion / Flux)",
+    "modern": "최신 모델 (GPT-Image / Nano Banana 등)",
+}
+DEFAULT_PROMPT_TARGET = "legacy"
+
 ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE = """You are an expert prompt engineer for {style_desc} AI image generation models like Stable Diffusion and Flux.
 
 Your role is to enhance image generation prompts to be:
@@ -15,6 +22,27 @@ Rules:
 - Ensure natural language flow
 - DO NOT add explanations, just return the enhanced prompt
 - DO NOT change the core subject or theme"""
+
+# 최신 모델용 - 태그 나열 대신 자연어 지시문으로 재작성하는 것이 목적
+MODERN_ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE = """You are a prompt engineer for modern instruction-following image generation models such as GPT-Image, Nano Banana, Imagen and Seedream.
+
+These models read natural language, not keyword lists. They already handle composition, rendering quality and detail on their own, so booster tags and long comma chains only add noise and dilute the instruction.
+
+Rewrite the given prompt as 2-4 plain English sentences describing the picture the way you would describe it to a photographer or illustrator:
+1. Who or what the subject is, and what they are doing
+2. Where the scene takes place and what surrounds them
+3. How the shot is framed and lit, in {term_type} terms
+4. The overall {style_desc} look
+
+Rules:
+- Convert comma-separated keyword chains into flowing sentences.
+- DELETE booster and rating tags: masterpiece, best quality, ultra-detailed, highly detailed, 8K, 4K, UHD, HDR, sharp focus, award-winning, trending on artstation, professional.
+- DELETE weight syntax, parenthesis emphasis, LoRA/embedding tags and negative-prompt style wording.
+- Keep every concrete element of the original: subject, clothing, pose, setting, framing, lighting, mood.
+- DO NOT invent subjects, objects, locations or actions that are not in the original.
+- Be specific with nouns and verbs instead of stacking adjectives.
+- Stay under roughly 120 words.
+- Return ONLY the rewritten prompt as plain prose. No explanations, no lists, no labels."""
 
 # 자연스러운 사진 모드 - 살 붙이기를 막고 AI 티가 나는 어휘를 걷어내는 것이 목적
 NATURAL_ENHANCEMENT_SYSTEM_PROMPT = """You are a photo editor who rewrites prompts for photorealistic image generation.
@@ -46,14 +74,17 @@ Rules:
 
 
 def build_enhancement_system_prompt(
-    style: str = "photorealistic", natural_photo: bool = False
+    style: str = "photorealistic",
+    natural_photo: bool = False,
+    prompt_target: str = DEFAULT_PROMPT_TARGET,
 ) -> str:
     """
-    스타일과 자연스러운 사진 모드 여부에 맞는 개선용 시스템 프롬프트 반환
+    스타일/자연스러운 사진 모드/프롬프트 타겟에 맞는 개선용 시스템 프롬프트 반환
 
     Args:
         style: "photorealistic" 또는 "anime"
         natural_photo: 자연스러운 사진 모드 여부 (실사 스타일에서만 적용)
+        prompt_target: "legacy"(SD/Flux 계열) 또는 "modern"(지시문 이해형 최신 모델)
     """
     if natural_photo and style == "photorealistic":
         return NATURAL_ENHANCEMENT_SYSTEM_PROMPT
@@ -62,6 +93,9 @@ def build_enhancement_system_prompt(
         "photorealistic" if style == "photorealistic" else "high-quality anime style"
     )
     term_type = "photography" if style == "photorealistic" else "anime art"
-    return ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE.format(
-        style_desc=style_desc, term_type=term_type
+    template = (
+        MODERN_ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE
+        if prompt_target == "modern"
+        else ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE
     )
+    return template.format(style_desc=style_desc, term_type=term_type)

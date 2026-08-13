@@ -6,7 +6,7 @@ from data.prompt_database import (
     NATURAL_DIRECTIVE_KEYS, build_natural_directives,
     get_category_options, get_modifier_options, get_english_value
 )
-from data.llm_prompts import build_enhancement_system_prompt
+from data.llm_prompts import DEFAULT_PROMPT_TARGET, build_enhancement_system_prompt
 
 
 def attach_natural_directives(
@@ -298,7 +298,8 @@ class PromptGenerator:
         use_modifiers: bool = True,
         use_quality_prefix: bool = True,
         use_natural_photo: bool = False,
-        natural_directive_keys: Optional[List[str]] = None
+        natural_directive_keys: Optional[List[str]] = None,
+        prompt_target: str = DEFAULT_PROMPT_TARGET
     ) -> Tuple[str, str]:
         """
         Ollama 모델을 사용한 프롬프트 생성
@@ -326,7 +327,7 @@ class PromptGenerator:
             return attach_natural_directives(prompt, natural_directive_keys)
 
         # Ollama로 개선 요청
-        system_prompt = build_enhancement_system_prompt(style, natural)
+        system_prompt = build_enhancement_system_prompt(style, natural, prompt_target)
 
         if natural:
             user_prompt = f"""Rewrite this image generation prompt so it reads like a real photograph:

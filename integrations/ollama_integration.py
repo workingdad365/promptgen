@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 from utils.logger import log_llm_interaction
 from data.llm_prompts import (
+    DEFAULT_PROMPT_TARGET,
     TRANSLATION_SYSTEM_PROMPT,
     build_enhancement_system_prompt,
 )
@@ -188,13 +189,15 @@ class PromptEnhancer:
         model: Optional[str] = None,
         user_requirements: Optional[str] = None,
         style: str = "photorealistic",
-        natural_photo: bool = False
+        natural_photo: bool = False,
+        prompt_target: str = DEFAULT_PROMPT_TARGET
     ) -> str:
         """
         프롬프트 개선
 
         Args:
             natural_photo: 자연스러운 사진 모드 (살 붙이기를 억제하고 AI 티 어휘를 제거)
+            prompt_target: "legacy"(SD/Flux 계열) 또는 "modern"(지시문 이해형 최신 모델)
         """
         model = model or self.default_model
         if not model:
@@ -207,7 +210,9 @@ class PromptEnhancer:
         if user_requirements:
             user_content += f"\n\nAdditional requirements: {user_requirements}"
 
-        system_prompt = build_enhancement_system_prompt(style, natural_photo)
+        system_prompt = build_enhancement_system_prompt(
+            style, natural_photo, prompt_target
+        )
 
         try:
             response = self.client.chat(

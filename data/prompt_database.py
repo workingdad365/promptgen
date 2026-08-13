@@ -30,7 +30,7 @@ MODIFIERS = {
         ]
     },
     "의상재질": [
-        "shimmering silk", "delicate lace", "premium denim", "supple leather",
+        "skintight", "form-fitting", "tight-fitting", "close-fitting","shimmering silk", "delicate lace", "premium denim", "supple leather",
         "soft cashmere", "flowing chiffon", "structured tweed", "fine wool",
         "luxurious velvet", "smooth satin", "crisp linen", "technical mesh",
         "organic cotton", "rich brocade", "metallic lamé", "sheer organza"
@@ -53,12 +53,20 @@ MODIFIERS = {
 DATA = {
     "나이/성별": {
         "sfw": {
+            "예쁜 여고생": "pretty high school girl",
+            "예쁜 여대생": "pretty college student girl",
+            "예쁜 10대 소녀": "pretty teenage girl",
+            "예쁜 k-pop 아이돌 여성": "pretty female k-pop idol",
             "20대 귀여운 여성": "cute woman in her 20s",
             "20대 예쁜 여성": "beautiful woman in her 20s",
             "20대 섹시한 여성": "sexy woman in her 20s",
             "20대 우아한 여성": "elegant woman in her 20s",
             "30대 세련된 여성": "sophisticated lady in her 30s",
             "우아한 젊은 여성": "graceful young woman",
+            "30대 귀여운 여성": "cute woman in her 30s",
+            "30대 예쁜 여성": "beautiful woman in her 30s",
+            "40대 귀여운 여성": "cute woman in her 40s",
+            "40대 예쁜 여성": "beautiful woman in her 40s",
             "40대 성숙한 여성": "mature elegant woman in her 40s",
             "20대 잘생긴 남성": "handsome young man in his 20s",
             "품격있는 신사": "distinguished gentleman",
@@ -117,6 +125,9 @@ DATA = {
     
     "헤어스타일": {
         "sfw": {
+            "단발 머리": "short bob haircut",
+            "똥 머리": "messy bun",
+            "올림 머리": "updo hairstyle",
             "긴 생머리": "long silky straight hair",
             "우아한 비치 웨이브": "elegant beach waves",
             "세련된 하이 포니테일": "sleek high ponytail",
@@ -152,7 +163,16 @@ DATA = {
     
     "의상": {
         "sfw": {
+            "키홀 터틀넥" : "keyhole turtleneck",
+            "스포츠 브라": "sports bra",
+            "슬립리스 터틀넥": "sleeveless turtleneck",
+            "짧은 썸홀탑": "cropped thumbhole top",
+            "썸홀탑": "thumbhole top",
             "레깅스": "tight leggings",
+            "숏 레깅스": "short leggings",
+            "카프리 레깅스": "capri leggings",
+            "요가복": "athletic yoga wear",
+            "레오타드": "leotard",
             "우아한 실크 이브닝 드레스": "elegant silk evening gown",
             "캐주얼 시크 오버사이즈 스웨터": "casual chic oversized sweater",
             "맞춤 정장 블레이저": "tailored professional blazer",
