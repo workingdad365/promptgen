@@ -969,7 +969,7 @@ wheels = [
 ]
 
 [[package]]
-name = "prompt-generator-for-images"
+name = "prompt-generator-for-images-and-videos"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [

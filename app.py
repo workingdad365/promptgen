@@ -23,13 +23,9 @@ from core.prompt_engine import (
     PromptGenerator,
     attach_natural_directives,
     create_generator,
+    get_creative_categories,
 )
 from data.llm_prompts import PROMPT_TARGETS
-from integrations.ollama_integration import (
-    OllamaClient,
-    PromptEnhancer,
-    get_ollama_client,
-)
 from integrations.external_llm_integration import (
     ExternalLLMClient,
     ExternalLLMPromptEnhancer,
@@ -40,9 +36,14 @@ from integrations.external_llm_integration import (
 from integrations.model_config import ModelConfigError
 from utils.history_manager import get_history_manager
 from utils.settings_manager import load_settings, save_settings
+from utils.wildcard_manager import (
+    expand_wildcards,
+    list_wildcards,
+    resolve_directory,
+)
 
 st.set_page_config(
-    page_title="Prompt Generator for Images",
+    page_title="Prompt Generator for Images and Videos",
     page_icon="🎨",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -77,10 +78,6 @@ st.markdown(
     }
     
     .stButton > button { border-radius: 8px; font-weight: 600; transition: all 0.3s ease; }
-    
-    .ollama-status { padding: 0.75rem; border-radius: 8px; margin: 0.5rem 0; }
-    .ollama-connected { background: #d1fae5; border: 1px solid #10b981; color: #065f46; }
-    .ollama-disconnected { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -94,17 +91,79 @@ except ModelConfigError as e:
     MODEL_CONFIG_ERROR = str(e)
 
 
-def render_copyable_prompt(text: str, element_id: str, height: int = 200) -> None:
+PROMPT_BLOCK_STYLES = {
+    "code": {
+        "box": (
+            "background: #1e1e1e; color: #d4d4d4; "
+            "font-family: monospace; font-size: 14px;"
+        ),
+        "button": "background: #374151; color: #ffffff;",
+    },
+    "translated": {
+        "box": (
+            "background: #f8fafc; color: #1e293b; border-left: 5px solid #4285f4; "
+            "font-size: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);"
+        ),
+        "button": "background: #4285f4; color: #ffffff;",
+    },
+}
+
+# Streamlit이 'C' 키를 캐시 삭제 단축키로 처리해 Ctrl+C 복사 시 다이얼로그가 뜨는 것을 막음
+HOTKEY_GUARD_HTML = """
+<script>
+(function () {
+  try {
+    const parentWin = window.parent;
+    if (!parentWin || parentWin === window || parentWin.__promptgenHotkeyGuard) return;
+    const guard = function (e) {
+      const key = (e.key || '').toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && (key === 'c' || key === 'x' || key === 'v')) {
+        e.stopImmediatePropagation();
+      }
+    };
+    parentWin.addEventListener('keydown', guard, true);
+    parentWin.document.addEventListener('keydown', guard, true);
+    parentWin.__promptgenHotkeyGuard = true;
+  } catch (err) {}
+})();
+</script>
+""".strip()
+
+
+def browse_directory(initial_dir: str):
+    """OS 디렉토리 선택 대화상자 표시. (선택된 경로, 오류메시지) 반환.
+
+    Streamlit 서버가 실행 중인 머신에 대화상자가 뜨므로 로컬 실행 시에만 동작함.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", 1)
+        start = initial_dir if initial_dir and os.path.isdir(initial_dir) else APP_DIR
+        selected = filedialog.askdirectory(initialdir=start, parent=root)
+        root.destroy()
+        return (os.path.normpath(selected) if selected else None), None
+    except Exception as e:
+        return None, str(e)
+
+
+def render_copyable_prompt(
+    text: str, element_id: str, height: int = 200, variant: str = "code"
+) -> None:
     """복사 버튼이 포함된 프롬프트 블록 렌더링"""
     escaped = html_lib.escape(text)
+    style = PROMPT_BLOCK_STYLES.get(variant, PROMPT_BLOCK_STYLES["code"])
     st.iframe(
         f"""
         <div style="position: relative; margin-bottom: 16px;">
             <button id="copyBtn-{element_id}"
-                    style="position: absolute; top: 8px; right: 8px; background: #374151; color: white; border: none; border-radius: 4px; padding: 6px 10px; cursor: pointer; font-size: 14px; z-index: 10;">
+                    style="position: absolute; top: 8px; right: 8px; {style['button']} border: none; border-radius: 4px; padding: 6px 10px; cursor: pointer; font-size: 14px; z-index: 10;">
                 📋
             </button>
-            <div id="prompt-{element_id}" style="background: #1e1e1e; color: #d4d4d4; padding: 16px; padding-right: 50px; border-radius: 8px; font-family: monospace; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; max-height: {height - 16}px; overflow-y: auto;">{escaped}</div>
+            <div id="prompt-{element_id}" style="{style['box']} padding: 16px; padding-right: 50px; border-radius: 8px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; max-height: {height - 16}px; overflow-y: auto;">{escaped}</div>
         </div>
         <script>
             document.getElementById('copyBtn-{element_id}').addEventListener('click', function() {{
@@ -136,14 +195,6 @@ if "prompt_target" not in st.session_state:
     )
 if "generator" not in st.session_state:
     st.session_state.generator = create_generator(st.session_state.mode)
-if "ollama_client" not in st.session_state:
-    st.session_state.ollama_client = None
-if "ollama_connected" not in st.session_state:
-    st.session_state.ollama_connected = False
-if "selected_ollama_model" not in st.session_state:
-    st.session_state.selected_ollama_model = SAVED_SETTINGS["last_ollama_model"]
-if "ollama_host" not in st.session_state:
-    st.session_state.ollama_host = SAVED_SETTINGS["ollama_host"]
 if "external_llm_client" not in st.session_state:
     st.session_state.external_llm_client = None
 if "external_llm_connected" not in st.session_state:
@@ -158,6 +209,8 @@ if "external_llm_model" not in st.session_state:
         )
 if "user_requirements_input" not in st.session_state:
     st.session_state.user_requirements_input = SAVED_SETTINGS["last_user_requirements"]
+if "dynamic_prompts_dir" not in st.session_state:
+    st.session_state.dynamic_prompts_dir = SAVED_SETTINGS["dynamic_prompts_dir"]
 if "save_history" not in st.session_state:
     st.session_state.save_history = SAVED_SETTINGS["save_history"]
 if "history_manager" not in st.session_state:
@@ -166,16 +219,14 @@ if "last_prompt" not in st.session_state:
     st.session_state.last_prompt = None
 if "prompt_counter" not in st.session_state:
     st.session_state.prompt_counter = 0
-if "chk_llm_enhance" not in st.session_state:
-    st.session_state.chk_llm_enhance = False
-if "chk_llm_translate" not in st.session_state:
-    st.session_state.chk_llm_translate = False
 if "use_modifiers" not in st.session_state:
     st.session_state.use_modifiers = SAVED_SETTINGS["use_modifiers"]
 if "use_quality_prefix" not in st.session_state:
     st.session_state.use_quality_prefix = SAVED_SETTINGS["use_quality_prefix"]
 if "use_natural_photo" not in st.session_state:
     st.session_state.use_natural_photo = SAVED_SETTINGS["use_natural_photo"]
+if "video_mode" not in st.session_state:
+    st.session_state.video_mode = SAVED_SETTINGS["video_mode"]
 if "natural_directive_keys" not in st.session_state:
     saved_keys = SAVED_SETTINGS["natural_directive_keys"]
     if isinstance(saved_keys, list):
@@ -186,8 +237,102 @@ if "natural_directive_keys" not in st.session_state:
         st.session_state.natural_directive_keys = list(NATURAL_DIRECTIVE_KEYS)
 
 
+def connect_external_llm(model_name):
+    """외부 LLM 연결 시도. (성공 여부, 메시지) 반환."""
+    if not model_name:
+        return False, "❌ 사용 가능한 모델이 없습니다."
+
+    has_key, key_msg = check_api_key_for_model(model_name)
+    if not has_key:
+        st.session_state.external_llm_client = None
+        st.session_state.external_llm_connected = False
+        return False, f"❌ {key_msg}"
+
+    try:
+        client = ExternalLLMClient(model=model_name)
+        success, message = client.test_connection()
+    except Exception as e:
+        st.session_state.external_llm_client = None
+        st.session_state.external_llm_connected = False
+        return False, f"❌ 연결 실패: {e}"
+
+    if success:
+        st.session_state.external_llm_client = client
+        st.session_state.external_llm_connected = True
+        return True, message
+
+    st.session_state.external_llm_client = None
+    st.session_state.external_llm_connected = False
+    return False, message
+
+
+# 최초 실행 시 '연결' 버튼을 누른 것과 동일하게 자동 연결 시도
+if "external_auto_connect_done" not in st.session_state:
+    st.session_state.external_auto_connect_done = True
+    if EXTERNAL_LLM_MODELS and st.session_state.external_llm_model:
+        auto_ok, auto_msg = connect_external_llm(st.session_state.external_llm_model)
+        st.session_state.external_auto_connect_result = (
+            auto_msg,
+            "success" if auto_ok else "error",
+        )
+
+
 with st.sidebar:
     st.markdown("## ⚙️ 엔진 설정")
+
+    # 외부 LLM 연동 (연결되어야 프롬프트 생성 가능)
+    st.markdown("### 🔑 외부 LLM 연동")
+    if not EXTERNAL_LLM_MODELS:
+        st.error(f"❌ 모델 설정을 불러오지 못했습니다: {MODEL_CONFIG_ERROR}")
+    else:
+        selected_model = st.selectbox(
+            "모델 선택",
+            options=EXTERNAL_LLM_MODELS,
+            index=EXTERNAL_LLM_MODELS.index(st.session_state.external_llm_model)
+            if st.session_state.external_llm_model in EXTERNAL_LLM_MODELS
+            else 0,
+            key="external_model_select",
+        )
+        if selected_model != st.session_state.external_llm_model:
+            st.session_state.external_llm_client = None
+            st.session_state.external_llm_connected = False
+        st.session_state.external_llm_model = selected_model
+
+        st.caption(f"제공자: {get_provider_label(selected_model)}")
+
+        auto_result = st.session_state.pop("external_auto_connect_result", None)
+        external_msg, external_msg_type = auto_result if auto_result else (None, None)
+
+        col_ext1, col_ext2 = st.columns(2)
+        with col_ext1:
+            if st.button("🔌 연결", use_container_width=True, key="external_connect"):
+                ok, message = connect_external_llm(
+                    st.session_state.external_llm_model
+                )
+                external_msg = message
+                external_msg_type = "success" if ok else "error"
+        with col_ext2:
+            if st.button(
+                "🔌 해제", use_container_width=True, key="external_disconnect"
+            ):
+                st.session_state.external_llm_client = None
+                st.session_state.external_llm_connected = False
+                external_msg, external_msg_type = "해제됨", "info"
+
+        if external_msg:
+            if external_msg_type == "success":
+                st.success(external_msg)
+            elif external_msg_type == "error":
+                st.error(external_msg)
+            else:
+                st.info(external_msg)
+
+        if st.session_state.external_llm_connected:
+            st.success(f"✅ 연결됨: {st.session_state.external_llm_model}")
+        else:
+            st.warning("⚠️ 외부 LLM에 연결해야 프롬프트를 생성할 수 있습니다.")
+
+    st.markdown("---")
 
     # 모드 선택
     st.markdown("### 🎯 프롬프트 모드")
@@ -239,6 +384,15 @@ with st.sidebar:
         help="끄면 프롬프트 앞부분의 품질 수식구(QUALITY_PREFIXES)가 제외됩니다.",
     )
 
+    st.checkbox(
+        "🎬 비디오 생성용",
+        key="video_mode",
+        help=(
+            "유튜브 쇼츠/틱톡 업로드를 가정한 8~10초 세로(9:16) 숏폼 영상 프롬프트로 재작성합니다. "
+            "피사체 동작·카메라 무빙·한 컷 연출이 포함되며 자연스러운 사진 모드는 적용되지 않습니다."
+        ),
+    )
+
     st.markdown("---")
 
     # 자연스러운 사진 모드
@@ -254,7 +408,9 @@ with st.sidebar:
     )
 
     if st.session_state.use_natural_photo:
-        if st.session_state.style != "photorealistic":
+        if st.session_state.video_mode:
+            st.caption("⚠️ 비디오 생성용 모드에서는 적용되지 않습니다.")
+        elif st.session_state.style != "photorealistic":
             st.caption("⚠️ 애니메이션 스타일에서는 적용되지 않습니다.")
 
         st.multiselect(
@@ -271,121 +427,49 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 외부 LLM 연동
-    st.markdown("### 🔑 외부 LLM 연동")
-    if not EXTERNAL_LLM_MODELS:
-        st.error(f"❌ 모델 설정을 불러오지 못했습니다: {MODEL_CONFIG_ERROR}")
+    # Dynamic Prompts 와일드카드
+    st.markdown("### 📁 Dynamic Prompts Directory")
+    col_dir1, col_dir2 = st.columns([1, 1])
+    with col_dir1:
+        if st.button("📂 찾기", use_container_width=True, key="dyn_dir_browse"):
+            picked, pick_error = browse_directory(st.session_state.dynamic_prompts_dir)
+            if picked:
+                st.session_state.dynamic_prompts_dir = picked
+                save_settings({"dynamic_prompts_dir": picked})
+                st.rerun()
+            elif pick_error:
+                st.session_state.dyn_dir_error = pick_error
+    with col_dir2:
+        if st.button("🗑️ 해제", use_container_width=True, key="dyn_dir_clear"):
+            st.session_state.dynamic_prompts_dir = ""
+            save_settings({"dynamic_prompts_dir": ""})
+            st.rerun()
+
+    dynamic_prompts_dir = st.text_input(
+        "와일드카드 디렉토리",
+        key="dynamic_prompts_dir",
+        help=(
+            "사용자 요구사항에 `__hair__` 처럼 적으면 이 디렉토리의 hair.txt 에서 "
+            "임의의 한 줄을 뽑아 치환합니다. 서브디렉토리는 탐색하지 않습니다."
+        ),
+    )
+    # 기본값(.env)이 그대로 파일에 굳지 않도록 실제 변경이 있을 때만 저장
+    if dynamic_prompts_dir != SAVED_SETTINGS["dynamic_prompts_dir"]:
+        save_settings({"dynamic_prompts_dir": dynamic_prompts_dir})
+
+    if st.session_state.pop("dyn_dir_error", None):
+        st.warning("탐색기를 열 수 없습니다. 경로를 직접 입력해 주세요.")
+
+    if not dynamic_prompts_dir.strip():
+        st.caption("경로 미설정 - 와일드카드 치환이 비활성화됩니다.")
+    elif resolve_directory(dynamic_prompts_dir) is None:
+        st.error("❌ 디렉토리를 찾을 수 없습니다.")
     else:
-        selected_model = st.selectbox(
-            "모델 선택",
-            options=EXTERNAL_LLM_MODELS,
-            index=EXTERNAL_LLM_MODELS.index(st.session_state.external_llm_model)
-            if st.session_state.external_llm_model in EXTERNAL_LLM_MODELS
-            else 0,
-            key="external_model_select",
-        )
-        if selected_model != st.session_state.external_llm_model:
-            st.session_state.external_llm_client = None
-            st.session_state.external_llm_connected = False
-        st.session_state.external_llm_model = selected_model
-
-        st.caption(f"제공자: {get_provider_label(selected_model)}")
-
-        external_msg = None
-        external_msg_type = None
-        col_ext1, col_ext2 = st.columns(2)
-        with col_ext1:
-            if st.button("🔌 연결", use_container_width=True, key="external_connect"):
-                has_key, key_msg = check_api_key_for_model(
-                    st.session_state.external_llm_model
-                )
-                if not has_key:
-                    external_msg, external_msg_type = f"❌ {key_msg}", "error"
-                else:
-                    client = ExternalLLMClient(
-                        model=st.session_state.external_llm_model
-                    )
-                    success, message = client.test_connection()
-                    if success:
-                        st.session_state.external_llm_client = client
-                        st.session_state.external_llm_connected = True
-                        st.session_state.chk_llm_enhance = True
-                        st.session_state.chk_llm_translate = True
-                        external_msg, external_msg_type = message, "success"
-                    else:
-                        st.session_state.external_llm_connected = False
-                        external_msg, external_msg_type = message, "error"
-        with col_ext2:
-            if st.button(
-                "🔌 해제", use_container_width=True, key="external_disconnect"
-            ):
-                st.session_state.external_llm_client = None
-                st.session_state.external_llm_connected = False
-                external_msg, external_msg_type = "해제됨", "info"
-
-        if external_msg:
-            if external_msg_type == "success":
-                st.success(external_msg)
-            elif external_msg_type == "error":
-                st.error(external_msg)
-            else:
-                st.info(external_msg)
-
-        if st.session_state.external_llm_connected:
-            st.success(f"✅ 연결됨: {st.session_state.external_llm_model}")
-
-    st.markdown("---")
-
-    # Ollama 연동
-    st.markdown("### 🤖 Ollama 연동")
-    ollama_host = st.text_input("Ollama 서버 주소", key="ollama_host")
-
-    ollama_msg = None
-    ollama_msg_type = None
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔌 연결", use_container_width=True, key="ollama_connect"):
-            client = OllamaClient(ollama_host)
-            success, message = client.test_connection()
-            if success:
-                st.session_state.ollama_client, st.session_state.ollama_connected = (
-                    client,
-                    True,
-                )
-                st.session_state.chk_llm_enhance = True
-                st.session_state.chk_llm_translate = True
-                ollama_msg, ollama_msg_type = message, "success"
-            else:
-                st.session_state.ollama_connected = False
-                ollama_msg, ollama_msg_type = message, "error"
-    with col2:
-        if st.button("🔌 해제", use_container_width=True, key="ollama_disconnect"):
-            st.session_state.ollama_client, st.session_state.ollama_connected = (
-                None,
-                False,
-            )
-            ollama_msg, ollama_msg_type = "해제됨", "info"
-
-    if ollama_msg:
-        if ollama_msg_type == "success":
-            st.success(ollama_msg)
-        elif ollama_msg_type == "error":
-            st.error(ollama_msg)
-        else:
-            st.info(ollama_msg)
-
-    if st.session_state.ollama_connected:
-        models = st.session_state.ollama_client.get_model_names()
-        if models:
-            saved_ollama_model = st.session_state.selected_ollama_model
-            st.session_state.selected_ollama_model = st.selectbox(
-                "모델 선택",
-                options=models,
-                index=models.index(saved_ollama_model)
-                if saved_ollama_model in models
-                else 0,
-                key="ollama_model_select",
-            )
+        wildcard_names = list_wildcards(dynamic_prompts_dir)
+        st.success(f"✅ 와일드카드 {len(wildcard_names)}개 인식됨")
+        if wildcard_names:
+            with st.expander("사용 가능한 와일드카드"):
+                st.caption(", ".join(f"__{name}__" for name in wildcard_names))
 
     st.markdown("---")
     stats = st.session_state.history_manager.get_statistics()
@@ -394,24 +478,30 @@ with st.sidebar:
 st.markdown(
     """
     <div class="main-header">
-        <h1>🎨 Prompt Generator for Images</h1>
+        <h1>🎨 Prompt Generator for Images and Videos</h1>
     </div>
 """,
     unsafe_allow_html=True,
 )
+
+st.iframe(HOTKEY_GUARD_HTML, height=1)
 
 tab1, tab2, tab3 = st.tabs(["🚀 프롬프트 생성", "📜 히스토리", "ℹ️ 사용 가이드"])
 
 with tab1:
     user_requirements = st.text_area(
         "💡 사용자 요구사항 (선택)",
-        placeholder="예: 'cyberpunk aesthetic with neon lights'...",
+        placeholder="예: 'cyberpunk aesthetic with neon lights', '__hair__'...",
         height=80,
         key="user_requirements_input",
+        help="`__이름__` 형식은 Dynamic Prompts Directory의 `이름.txt`에서 임의의 한 줄로 치환됩니다.",
     )
 
     st.markdown("---")
     st.markdown("### 🎨 세부 카테고리 설정")
+    st.caption(
+        "'제외'는 해당 항목을 프롬프트에서 빼고, 'LLM'은 LLM이 상상력을 발휘해 채우도록 맡깁니다. (LLM 연결 시)"
+    )
     selected_configs = {}
     cols = st.columns(3)
     categories = list(DATA.keys())
@@ -421,7 +511,7 @@ with tab1:
 
     for i, category in enumerate(categories):
         with cols[i % 3]:
-            options = ["랜덤", "제외"] + get_category_options(
+            options = ["랜덤", "제외", "LLM"] + get_category_options(
                 category, st.session_state.mode
             )
             display_label = f"{category} ({CATEGORY_LABELS.get(category, category)})"
@@ -436,42 +526,29 @@ with tab1:
     st.markdown("---")
     col_gen, col_opt = st.columns([2, 1])
 
-    # LLM 사용 가능 여부 확인
-    llm_available = (
-        st.session_state.ollama_connected or st.session_state.external_llm_connected
-    )
+    # 외부 LLM 연결이 있어야만 생성 가능
+    llm_available = st.session_state.external_llm_connected
 
     with col_opt:
-        # LLM 연결 상태에 따라 자동 결정
-        use_llm_enhance = llm_available
-        use_llm_translate = llm_available
-
-        # LLM 연결 시 사용할 LLM 자동 선택
         if llm_available:
-            llm_options = []
-            if st.session_state.ollama_connected:
-                llm_options.append("Ollama")
-            if st.session_state.external_llm_connected:
-                llm_options.append(f"외부LLM ({st.session_state.external_llm_model})")
-
-            if len(llm_options) > 1:
-                selected_llm = st.radio(
-                    "LLM 선택", options=llm_options, horizontal=True, key="llm_select"
-                )
-            elif len(llm_options) == 1:
-                selected_llm = llm_options[0]
-                st.caption(f"사용: {selected_llm}")
-            else:
-                selected_llm = None
+            st.caption(f"사용: {st.session_state.external_llm_model}")
         else:
-            selected_llm = None
-            st.caption("⚠️ LLM 미연결 - 개선/번역 비활성화")
+            st.caption("⚠️ 외부 LLM 미연결 - 생성 불가")
 
         save_history = st.checkbox("💾 저장", key="save_history")
 
     with col_gen:
         generate_clicked = st.button(
-            "🚀 프롬프트 생성", use_container_width=True, type="primary"
+            "🚀 프롬프트 생성",
+            use_container_width=True,
+            type="primary",
+            disabled=not llm_available,
+        )
+
+    if not llm_available:
+        st.warning(
+            "외부 LLM에 연결되어야 프롬프트를 생성할 수 있습니다. "
+            "사이드바의 '외부 LLM 연동'에서 연결해 주세요."
         )
 
     if generate_clicked:
@@ -481,26 +558,30 @@ with tab1:
         # 처리 로그 저장용
         process_logs = []
 
+        user_requirements, wildcard_logs = expand_wildcards(
+            user_requirements, st.session_state.dynamic_prompts_dir
+        )
+
         with st.status("프롬프트 생성 중...", expanded=True) as status:
+            if wildcard_logs:
+                st.write(f"🎲 와일드카드 {len(wildcard_logs)}개 치환")
+                for log in wildcard_logs:
+                    process_logs.append(f"[와일드카드] {log}")
+
             # LLM 연결 상태 로그
             process_logs.append(
-                f"[연결 상태] Ollama: {'연결됨' if st.session_state.ollama_connected else '미연결'}"
+                f"[연결 상태] 외부LLM: 연결됨 ({st.session_state.external_llm_model})"
             )
-            process_logs.append(
-                f"[연결 상태] 외부LLM: {'연결됨 (' + st.session_state.external_llm_model + ')' if st.session_state.external_llm_connected else '미연결'}"
-            )
-            process_logs.append(
-                f"[옵션] LLM 개선: {use_llm_enhance}, LLM 번역: {use_llm_translate}"
-            )
-            if use_llm_enhance:
-                process_logs.append(
-                    f"[옵션] 선택된 LLM: {selected_llm if selected_llm else '없음'}"
-                )
+
+            # 비디오 모드에서는 사진용 지시문을 쓰지 않음
+            video_mode = st.session_state.video_mode
+            process_logs.append(f"[옵션] 비디오 생성용 모드: {video_mode}")
 
             # 자연스러운 사진 모드는 실사 스타일에서만 적용
             natural_photo = (
                 st.session_state.use_natural_photo
                 and st.session_state.style == "photorealistic"
+                and not video_mode
             )
             natural_keys = (
                 st.session_state.natural_directive_keys if natural_photo else None
@@ -513,6 +594,13 @@ with tab1:
             process_logs.append(
                 f"[옵션] 프롬프트 방식: {PROMPT_TARGETS[prompt_target]}"
             )
+
+            # 'LLM' 항목은 LLM이 상상으로 채우도록 위임
+            creative_categories = get_creative_categories(selected_configs)
+            if creative_categories:
+                process_logs.append(
+                    f"[옵션] LLM 상상 위임 항목: {', '.join(creative_categories)}"
+                )
 
             # 1. 기본 프롬프트 생성 (지시문은 LLM 개선 후 부착)
             st.write("📝 기본 프롬프트 생성 중...")
@@ -540,109 +628,63 @@ with tab1:
             enhanced_by = None
 
             # 2. LLM 개선 처리
-            if use_llm_enhance and selected_llm:
-                st.write(f"🤖 LLM 개선 중... ({selected_llm})")
-                process_logs.append(f"[LLM 개선] 시작 - 사용: {selected_llm}")
-                try:
-                    original_length = len(english_prompt)
-                    if selected_llm == "Ollama" and st.session_state.ollama_connected:
-                        enhancer = PromptEnhancer(st.session_state.ollama_client)
-                        enhancer.set_default_model(
-                            st.session_state.selected_ollama_model
-                        )
-                        process_logs.append(
-                            f"[LLM 개선] Ollama 모델: {st.session_state.selected_ollama_model}"
-                        )
-                        english_prompt = enhancer.enhance_prompt(
-                            english_prompt,
-                            user_requirements=user_requirements,
-                            style=st.session_state.style,
-                            natural_photo=natural_photo,
-                            prompt_target=prompt_target,
-                        )
-                        llm_enhanced = True
-                        enhanced_by = (
-                            f"Ollama ({st.session_state.selected_ollama_model})"
-                        )
-                    elif (
-                        selected_llm.startswith("외부LLM")
-                        and st.session_state.external_llm_connected
-                    ):
-                        enhancer = ExternalLLMPromptEnhancer(
-                            st.session_state.external_llm_client
-                        )
-                        process_logs.append(
-                            f"[LLM 개선] 외부LLM 모델: {st.session_state.external_llm_model}"
-                        )
-                        english_prompt = enhancer.enhance_prompt(
-                            english_prompt,
-                            user_requirements=user_requirements,
-                            style=st.session_state.style,
-                            natural_photo=natural_photo,
-                            prompt_target=prompt_target,
-                        )
-                        llm_enhanced = True
-                        enhanced_by = st.session_state.external_llm_model
+            external_model = st.session_state.external_llm_model
+            st.write(f"🤖 LLM 개선 중... ({external_model})")
+            process_logs.append(f"[LLM 개선] 시작 - 사용: {external_model}")
+            try:
+                original_length = len(english_prompt)
+                enhancer = ExternalLLMPromptEnhancer(
+                    st.session_state.external_llm_client
+                )
+                english_prompt = enhancer.enhance_prompt(
+                    english_prompt,
+                    user_requirements=user_requirements,
+                    style=st.session_state.style,
+                    natural_photo=natural_photo,
+                    prompt_target=prompt_target,
+                    creative_categories=creative_categories,
+                    video_mode=video_mode,
+                )
+                llm_enhanced = True
+                enhanced_by = external_model
 
-                    process_logs.append(
-                        f"[LLM 개선] 완료 - 길이: {original_length}자 → {len(english_prompt)}자"
-                    )
-                    st.write(
-                        f"✅ LLM 개선 완료 ({original_length}자 → {len(english_prompt)}자)"
-                    )
-                except Exception as e:
-                    error_msg = str(e)
-                    process_logs.append(f"[LLM 개선] 실패 - 오류: {error_msg}")
-                    st.write(f"⚠️ LLM 개선 실패: {error_msg}")
+                process_logs.append(
+                    f"[LLM 개선] 완료 - 길이: {original_length}자 → {len(english_prompt)}자"
+                )
+                st.write(
+                    f"✅ LLM 개선 완료 ({original_length}자 → {len(english_prompt)}자)"
+                )
+            except Exception as e:
+                error_msg = str(e)
+                process_logs.append(f"[LLM 개선] 실패 - 오류: {error_msg}")
+                st.write(f"⚠️ LLM 개선 실패: {error_msg}")
 
-            # 3. 번역 처리 (LLM 연결 시에만)
+            # 3. 번역 처리
             korean_prompt = ""
-            if use_llm_translate and llm_available:
-                translate_llm = selected_llm
-                st.write(f"🌐 LLM 번역 중... ({translate_llm})")
-                process_logs.append(f"[LLM 번역] 시작 - 사용: {translate_llm}")
+            st.write(f"🌐 LLM 번역 중... ({external_model})")
+            process_logs.append(f"[LLM 번역] 시작 - 사용: {external_model}")
 
-                try:
-                    if translate_llm == "Ollama" and st.session_state.ollama_connected:
-                        translator = PromptEnhancer(st.session_state.ollama_client)
-                        translator.set_default_model(
-                            st.session_state.selected_ollama_model
-                        )
-                        process_logs.append(
-                            f"[LLM 번역] Ollama 모델: {st.session_state.selected_ollama_model}"
-                        )
-                        korean_prompt = translator.translate_to_korean(english_prompt)
-                    elif (
-                        translate_llm.startswith("외부LLM")
-                        and st.session_state.external_llm_connected
-                    ):
-                        translator = ExternalLLMPromptEnhancer(
-                            st.session_state.external_llm_client
-                        )
-                        process_logs.append(
-                            f"[LLM 번역] 외부LLM 모델: {st.session_state.external_llm_model}"
-                        )
-                        korean_prompt = translator.translate_to_korean(english_prompt)
+            try:
+                translator = ExternalLLMPromptEnhancer(
+                    st.session_state.external_llm_client
+                )
+                korean_prompt = translator.translate_to_korean(english_prompt)
 
-                    if korean_prompt and korean_prompt.strip():
-                        process_logs.append(
-                            f"[LLM 번역] 완료 - 길이: {len(korean_prompt)}자"
-                        )
-                        st.write(f"✅ LLM 번역 완료 ({len(korean_prompt)}자)")
-                    else:
-                        process_logs.append(f"[LLM 번역] 경고 - 빈 결과 반환")
-                        st.write("⚠️ LLM 번역 결과가 비어있음")
-                        korean_prompt = ""
-
-                except Exception as e:
-                    error_msg = str(e)
-                    process_logs.append(f"[LLM 번역] 실패 - 오류: {error_msg}")
-                    st.write(f"⚠️ LLM 번역 실패: {error_msg}")
+                if korean_prompt and korean_prompt.strip():
+                    process_logs.append(
+                        f"[LLM 번역] 완료 - 길이: {len(korean_prompt)}자"
+                    )
+                    st.write(f"✅ LLM 번역 완료 ({len(korean_prompt)}자)")
+                else:
+                    process_logs.append("[LLM 번역] 경고 - 빈 결과 반환")
+                    st.write("⚠️ LLM 번역 결과가 비어있음")
                     korean_prompt = ""
-            else:
-                # LLM 미연결 시 번역 생략
-                process_logs.append("[번역] LLM 미연결 - 번역 생략")
-                st.write("⏭️ 번역 생략 (LLM 미연결)")
+
+            except Exception as e:
+                error_msg = str(e)
+                process_logs.append(f"[LLM 번역] 실패 - 오류: {error_msg}")
+                st.write(f"⚠️ LLM 번역 실패: {error_msg}")
+                korean_prompt = ""
 
             # 4. 자연스러움 지시문 부착
             # LLM 개선/번역이 끝난 뒤 붙여 지시문이 요약·변형되지 않도록 함
@@ -695,9 +737,11 @@ with tab1:
             '<span class="prompt-label">🇰🇷 한글 번역 (In-App)</span>',
             unsafe_allow_html=True,
         )
-        st.markdown(
-            f'<div class="translated-box">{st.session_state.last_prompt["korean"]}</div>',
-            unsafe_allow_html=True,
+        render_copyable_prompt(
+            st.session_state.last_prompt["korean"],
+            "korean",
+            height=180,
+            variant="translated",
         )
         if st.session_state.last_prompt.get("natural_photo"):
             st.caption(
@@ -795,7 +839,7 @@ with tab3:
 
 st.markdown("---")
 st.markdown(
-    '<div style="text-align:center; color:grey; font-size:0.8rem;">Prompt Generator for Images</div>',
+    '<div style="text-align:center; color:grey; font-size:0.8rem;">Prompt Generator for Images and Videos</div>',
     unsafe_allow_html=True,
 )
 
@@ -808,10 +852,9 @@ save_settings(
         "use_modifiers": st.session_state.use_modifiers,
         "use_quality_prefix": st.session_state.use_quality_prefix,
         "use_natural_photo": st.session_state.use_natural_photo,
+        "video_mode": st.session_state.video_mode,
         "natural_directive_keys": list(st.session_state.natural_directive_keys),
         "last_external_model": st.session_state.external_llm_model,
-        "ollama_host": st.session_state.ollama_host,
-        "last_ollama_model": st.session_state.selected_ollama_model,
         "save_history": st.session_state.save_history,
         "category_selections": {
             category: st.session_state.get(f"c_{category}", "랜덤")

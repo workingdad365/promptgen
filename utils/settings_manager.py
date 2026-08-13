@@ -16,12 +16,13 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "use_quality_prefix": True,
     "use_natural_photo": True,
     "natural_directive_keys": None,  # None이면 전체 지시문 사용
+    "video_mode": False,
     "last_external_model": None,
-    "ollama_host": "http://localhost:11434",
-    "last_ollama_model": None,
     "save_history": True,
     "last_user_requirements": "",
     "category_selections": {},
+    # UI에서 한 번이라도 지정하면 저장된 값이 우선하고 이 기본값은 더 이상 쓰이지 않음
+    "dynamic_prompts_dir": os.getenv("DYNAMYC_PROMPTS_DEFAULT_ROOT", ""),
 }
 
 

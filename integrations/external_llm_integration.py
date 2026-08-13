@@ -3,6 +3,7 @@ from utils.logger import log_llm_interaction
 from data.llm_prompts import (
     DEFAULT_PROMPT_TARGET,
     TRANSLATION_SYSTEM_PROMPT,
+    build_creative_freedom_instruction,
     build_enhancement_system_prompt,
 )
 from integrations.model_config import (
@@ -409,6 +410,8 @@ class ExternalLLMPromptEnhancer:
         style: str = "photorealistic",
         natural_photo: bool = False,
         prompt_target: str = DEFAULT_PROMPT_TARGET,
+        creative_categories: Optional[List[str]] = None,
+        video_mode: bool = False,
     ) -> str:
         """
         프롬프트 개선
@@ -416,16 +419,23 @@ class ExternalLLMPromptEnhancer:
         Args:
             natural_photo: 자연스러운 사진 모드 (살 붙이기를 억제하고 AI 티 어휘를 제거)
             prompt_target: "legacy"(SD/Flux 계열) 또는 "modern"(지시문 이해형 최신 모델)
+            creative_categories: LLM이 상상으로 채울 항목의 영문 라벨 목록
+            video_mode: 숫폼 영상(8~10초)용 프롬프트로 재작성
         """
-        if natural_photo and style == "photorealistic":
+        if video_mode:
+            user_content = f"Rewrite this still-image prompt as a short video prompt:\n{original_prompt}"
+        elif natural_photo and style == "photorealistic":
             user_content = f"Rewrite this prompt:\n{original_prompt}"
         else:
             user_content = f"Enhance this prompt:\n{original_prompt}"
         if user_requirements:
             user_content += f"\n\nAdditional requirements: {user_requirements}"
+        creative_instruction = build_creative_freedom_instruction(creative_categories)
+        if creative_instruction:
+            user_content += f"\n\n{creative_instruction}"
 
         system_prompt = build_enhancement_system_prompt(
-            style, natural_photo, prompt_target
+            style, natural_photo, prompt_target, video_mode
         )
 
         try:

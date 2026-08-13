@@ -1,14 +1,17 @@
-# Prompt Generator for Images
+# Prompt Generator for Images and Videos
 
-이미지 생성 AI를 위한 프롬프트 생성 도구. 랜덤 조합 기반의 프롬프트를 생성하고, LLM을 통해 개선 및 번역 기능을 제공함.
+이미지 생성 AI를 위한 프롬프트 생성 도구. 랜덤 조합 기반의 프롬프트를 생성하고, 외부 LLM을 통해 개선 및 번역함.
 
 ## 주요 기능
 
-- 카테고리 기반 랜덤 프롬프트 생성
-- LLM을 통한 프롬프트 개선 (Ollama / OpenAI / Gemini / Claude / OpenAI 호환 API)
-- `models.json` 을 통한 외부 LLM 모델 확장 설정
-- 최근 사용한 모델 자동 기억
-- LLM 또는 Google Translate를 통한 한국어 번역
+- 카테고리 기반 랜덤 프롬프트 생성 (카테고리별 `랜덤` / `제외` / `LLM` / 직접 선택)
+- 외부 LLM을 통한 프롬프트 개선 및 한국어 번역 (OpenAI / Gemini / Claude / OpenAI 호환 API)
+- 앱 실행 시 외부 LLM 자동 연결. 연결되지 않으면 프롬프트 생성 불가
+- `models.json` 을 통한 외부 LLM 모델 확장 설정 및 최근 사용 모델 자동 기억
+- 프롬프트 방식 선택 (레거시 태그형 / 최신 모델용 자연어형)
+- 자연스러운 사진 모드 (AI 티 제거 지시문)
+- 비디오 생성용 모드 (유튜브 쇼츠·틱톡 대상 8~10초 세로 숏폼 프롬프트)
+- Dynamic Prompts 와일드카드 치환 (`__hair__` → `hair.txt` 의 임의 한 줄)
 - 프롬프트 히스토리 저장 및 관리
 - 클립보드 복사 기능
 
@@ -16,6 +19,7 @@
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) (Python 패키지 관리자)
+- 외부 LLM API 키 (필수)
 
 ## API 키 설정
 
@@ -30,6 +34,9 @@ OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=AIza...
 ANTHROPIC_API_KEY=sk-ant...
 OPENROUTER_API_KEY=sk-or-...
+
+# Dynamic Prompts 와일드카드 디렉토리 기본값 (선택)
+DYNAMYC_PROMPTS_DEFAULT_ROOT=H:\ComfyUI\custom_nodes\comfyui-dynamicprompts\wildcards
 ```
 
 또는 직접 환경변수로 설정할 수도 있음:
@@ -47,8 +54,6 @@ export ANTHROPIC_API_KEY=your-anthropic-key
 ```
 
 사용할 환경변수 이름은 `models.json` 의 `api_key` 항목으로 결정되므로, 모델을 추가할 때 원하는 이름을 자유롭게 지정할 수 있음.
-
-Ollama 사용 시에는 별도 API 키 없이 로컬 서버 연결만 필요.
 
 ## 외부 LLM 모델 설정 (`models.json`)
 
@@ -93,6 +98,7 @@ Ollama 사용 시에는 별도 API 키 없이 로컬 서버 연결만 필요.
 
 - `api_key` 에 API 키를 직접 적지 말 것. 반드시 환경변수 이름만 기재함.
 - 앱 실행 시 목록의 **첫 번째 모델**이 기본 선택되며, 이후에는 마지막으로 선택한 모델이 `user_settings.json` 에 저장되어 자동 선택됨.
+- 앱을 실행하면 선택된 모델로 **자동 연결**을 시도함. 연결 실패 시 사이드바에 원인이 표시되고 프롬프트 생성 버튼이 비활성화됨.
 - `base_url` 에 `/chat/completions` 까지 적어도 내부에서 루트 URL 로 정규화함.
 - `models.json` 에 오류가 있으면 사이드바에 원인 메시지가 표시됨.
 
@@ -127,7 +133,7 @@ promptgen --server.port 8080 --server.headless true
 - `--editable` 설치이므로 소스를 수정하면 즉시 반영됨. 단, 프로젝트 디렉토리를 이동하거나 삭제하면 실행되지 않음.
 - 의존성이 변경된 경우 `uv tool install --editable . --force`로 재설치함.
 - `.env`, `models.json`, `prompt_history.json`, `user_settings.json` 은 실행 위치와 무관하게 항상 프로젝트 루트를 기준으로 처리됨.
-- 제거하려면 `uv tool uninstall prompt-generator-for-images`를 실행함.
+- 제거하려면 `uv tool uninstall prompt-generator-for-images-and-videos`를 실행함.
 
 ### 방법 2. 프로젝트 디렉토리에서 직접 실행
 
@@ -148,21 +154,35 @@ uv run streamlit run app.py
 ├── core/
 │   └── prompt_engine.py   # 프롬프트 생성 엔진
 ├── data/
-│   └── prompt_database.py # 프롬프트 데이터베이스
+│   ├── prompt_database.py # 프롬프트 데이터베이스
+│   └── llm_prompts.py     # LLM 개선/번역/비디오 모드 시스템 프롬프트
 ├── integrations/
 │   ├── model_config.py    # models.json 로더
-│   ├── ollama_integration.py      # Ollama 연동
 │   └── external_llm_integration.py # 외부 LLM 연동 (OpenAI/Gemini/Claude/OpenAI 호환)
 ├── utils/
-│   ├── history_manager.py # 히스토리 관리
+│   ├── history_manager.py  # 히스토리 관리
 │   ├── settings_manager.py # 최근 선택 모델 등 사용자 설정
-│   └── translation.py     # 번역 유틸리티
+│   ├── wildcard_manager.py # Dynamic Prompts 와일드카드 치환
+│   └── logger.py           # LLM 호출 로깅
 └── requirements.txt       # 의존성 목록
 ```
 
 ## 사용 방법
 
-1. 좌측 사이드바에서 모드 선택 (SFW/NSFW)
-2. LLM 연결 (외부 LLM 또는 Ollama)
-3. "프롬프트 생성" 버튼 클릭
-4. 생성된 영문 프롬프트 우측 복사 버튼 클릭하여 이미지 생성 AI에 사용
+1. 앱 실행 시 사이드바 최상단의 외부 LLM이 자동 연결됨. 필요하면 모델을 바꾸고 "연결" 버튼을 누름
+2. 프롬프트 모드(SFW/NSFW), 아트 스타일, 프롬프트 방식을 선택함
+3. 필요 시 옵션을 조정함
+   - 자연스러운 사진 모드: 실사 스타일에서 AI 티를 줄이는 지시문을 부착함
+   - 비디오 생성용: 8~10초 9:16 숏폼 영상 프롬프트로 재작성함 (이때 자연스러운 사진 모드는 적용되지 않음)
+   - Dynamic Prompts Directory: 와일드카드 `.txt` 파일이 있는 디렉토리를 지정함
+4. 세부 카테고리를 설정함
+   - `랜덤`: 해당 카테고리에서 임의 선택
+   - `제외`: 프롬프트에서 제외
+   - `LLM`: 항목을 비워두고 LLM이 상상해서 채우도록 위임
+5. 사용자 요구사항에 `__hair__` 처럼 적으면 지정한 디렉토리의 `hair.txt` 에서 임의의 한 줄로 치환됨 (서브디렉토리는 탐색하지 않음)
+6. "프롬프트 생성" 버튼을 클릭함
+7. 생성된 영문 프롬프트와 한글 번역의 복사 버튼을 눌러 이미지/영상 생성 AI에 사용함
+
+## 사용자 설정 저장
+
+`user_settings.json` 에 모드, 스타일, 프롬프트 방식, 체크박스 옵션, 비디오 모드, 카테고리 선택, 마지막 사용 모델, 와일드카드 디렉토리 등이 저장되어 다음 실행 시 복원됨.

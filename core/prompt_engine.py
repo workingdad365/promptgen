@@ -3,10 +3,19 @@ from typing import Dict, Optional, List, Tuple
 from data.prompt_database import (
     MODIFIERS, DATA, PROMPT_TEMPLATES,
     QUALITY_PREFIXES, QUALITY_SUFFIXES, NEGATIVE_PROMPTS,
-    NATURAL_DIRECTIVE_KEYS, build_natural_directives,
+    NATURAL_DIRECTIVE_KEYS, CATEGORY_LABELS, build_natural_directives,
     get_category_options, get_modifier_options, get_english_value
 )
 from data.llm_prompts import DEFAULT_PROMPT_TARGET, build_enhancement_system_prompt
+
+
+def get_creative_categories(selected_options: Dict[str, str]) -> List[str]:
+    """'LLM'으로 둔 카테고리의 영문 라벨 목록 (LLM이 상상으로 채울 대상)"""
+    return [
+        CATEGORY_LABELS.get(category, category)
+        for category, value in selected_options.items()
+        if value == "LLM"
+    ]
 
 
 def attach_natural_directives(
@@ -61,12 +70,13 @@ class PromptGenerator:
         
         Args:
             category: 카테고리 이름
-            user_selection: 사용자 선택값 ("랜덤", "제외", 또는 한글 키)
+            user_selection: 사용자 선택값 ("랜덤", "제외", "LLM", 또는 한글 키)
         
         Returns:
             선택된 영문 값 또는 None
         """
-        if user_selection == "제외":
+        # LLM은 개선 단계에서 채우므로 기본 프롬프트에는 넣지 않음
+        if user_selection in ("제외", "LLM"):
             return None
         
         if user_selection != "랜덤":
@@ -287,84 +297,6 @@ class PromptGenerator:
         )
 
         return positive_prompt, negative_prompt
-    
-    def generate_with_ollama(
-        self,
-        selected_options: Dict[str, str],
-        user_requirements: Optional[str],
-        ollama_client,
-        model_name: str,
-        style: str = "photorealistic",
-        use_modifiers: bool = True,
-        use_quality_prefix: bool = True,
-        use_natural_photo: bool = False,
-        natural_directive_keys: Optional[List[str]] = None,
-        prompt_target: str = DEFAULT_PROMPT_TARGET
-    ) -> Tuple[str, str]:
-        """
-        Ollama 모델을 사용한 프롬프트 생성
-
-        기본 생성된 프롬프트를 Ollama 모델로 개선합니다.
-        자연스러운 사진 모드에서는 지시문 블록을 개선 대상에서 제외하고
-        개선이 끝난 뒤 원문 그대로 다시 부착합니다.
-        """
-        natural = use_natural_photo and style == "photorealistic"
-
-        # 기본 프롬프트 생성 (지시문은 개선 후 부착)
-        base_positive, base_negative = self.generate(
-            selected_options,
-            user_requirements,
-            style=style,
-            use_modifiers=use_modifiers,
-            use_quality_prefix=use_quality_prefix,
-            use_natural_photo=use_natural_photo,
-            include_natural_directives=False,
-        )
-
-        def finalize(prompt: str) -> str:
-            if not natural:
-                return prompt
-            return attach_natural_directives(prompt, natural_directive_keys)
-
-        # Ollama로 개선 요청
-        system_prompt = build_enhancement_system_prompt(style, natural, prompt_target)
-
-        if natural:
-            user_prompt = f"""Rewrite this image generation prompt so it reads like a real photograph:
-
-Original prompt: {base_positive}
-
-Requirements: {user_requirements if user_requirements else "None specified"}
-
-Return the rewritten prompt only."""
-        else:
-            user_prompt = f"""Enhance this image generation prompt for maximum quality and natural flow:
-
-Original prompt: {base_positive}
-
-Requirements: {user_requirements if user_requirements else "None specified"}
-
-Return the enhanced prompt only."""
-
-        try:
-            response = ollama_client.chat(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
-            )
-            enhanced_prompt = response['message']['content'].strip()
-
-            # 응답이 너무 짧거나 이상한 경우 기본값 사용
-            if len(enhanced_prompt) < 50 or enhanced_prompt.startswith("I "):
-                return finalize(base_positive), base_negative
-
-            return finalize(enhanced_prompt), base_negative
-
-        except Exception as e:
-            print(f"Ollama enhancement failed: {e}")
-            return finalize(base_positive), base_negative
 
 
 class PromptVariationGenerator:

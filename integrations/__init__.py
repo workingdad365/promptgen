@@ -1,15 +1,15 @@
-from .ollama_integration import (
-    OllamaClient,
-    OllamaModel,
-    PromptEnhancer,
-    get_ollama_client,
-    reset_ollama_client
+from .external_llm_integration import (
+    ExternalLLMClient,
+    ExternalLLMPromptEnhancer,
+    check_api_key_for_model,
+    get_external_llm_models,
+    get_provider_label,
 )
 
 __all__ = [
-    'OllamaClient',
-    'OllamaModel',
-    'PromptEnhancer',
-    'get_ollama_client',
-    'reset_ollama_client'
+    'ExternalLLMClient',
+    'ExternalLLMPromptEnhancer',
+    'check_api_key_for_model',
+    'get_external_llm_models',
+    'get_provider_label',
 ]

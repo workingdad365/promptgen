@@ -61,6 +61,34 @@ Hard rules:
 
 Return ONLY the rewritten prompt as a single block of text. No explanations, no bullet points, no preamble."""
 
+# 숏폼 영상(유튜브 쇼츠/틱톡) 생성용 - 정지 이미지가 아니라 8~10초 클립을 묘사하도록 재작성
+VIDEO_ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE = """You are a short-form video director writing prompts for text-to-video models such as Sora, Veo, Kling and Runway.
+
+Rewrite the given still-image prompt as a brief for ONE {style_desc} short video of 8 to 10 seconds, shot vertically at 9:16 for YouTube Shorts and TikTok.
+
+Output this structure in English:
+
+**Prompt:**
+One flowing paragraph. Open by stating the duration and format (for example "An 8-second vertical cinematic clip"), then cover: the subject and appearance exactly as given; what the subject does from the first frame to the last, broken into at most 2-3 short beats; camera work (shot size, movement, slow motion or a single cut if it helps); setting, lighting, color grade and ambient motion; and how the clip ends.
+
+**Key Details:**
+- Mood: ...
+- Camera: ...
+- Pacing: ...
+- Audio: music genre and ambient sound that fit the scene
+- Ending beat: ...
+- On-screen text: a hook of 5 words or fewer, or "none" if it would not suit the scene
+
+Rules:
+- Keep every concrete element of the original prompt: subject, clothing, framing, setting, lighting, mood.
+- The action must fit comfortably in 8-10 seconds and stay physically plausible; avoid complex choreography or crowds.
+- Keep the subject and key action inside a 9:16 frame.
+- No timestamps, no numbered shot lists, no storyboard tables.
+- DELETE still-image booster tags: masterpiece, best quality, 8K, 4K, UHD, HDR, sharp focus, award-winning, trending on artstation.
+- Keep the whole output under roughly 180 words.
+
+Return ONLY the brief. No preamble, no explanation."""
+
 TRANSLATION_SYSTEM_PROMPT = """You are a professional translator specializing in creative and technical content.
 
 Translate the given image generation prompt from English to Korean.
@@ -69,14 +97,29 @@ Rules:
 - Maintain all technical photography terms
 - Keep the natural flow of the description
 - Preserve the artistic intent
+- Keep any markdown headings and bullet structure as-is
 - DO NOT add explanations
 - Return ONLY the Korean translation"""
+
+# 사용자가 '제외'로 남긴 항목은 빼지 말고 LLM이 상상해서 채우도록 지시
+CREATIVE_FREEDOM_INSTRUCTION_TEMPLATE = """Creative freedom (highest priority): these aspects were deliberately left unspecified: {aspects}.
+Do not omit them and do not describe them vaguely. Invent each one yourself with bold imagination, pick a specific and interesting choice, and weave it into the prompt as concretely as the elements that were given.
+This overrides any rule against adding new elements, but ONLY for the listed aspects. Everything else stays as given."""
+
+
+def build_creative_freedom_instruction(aspects) -> str:
+    """LLM이 상상으로 채울 항목 목록을 지시문으로 변환 (없으면 빈 문자열)."""
+    labels = [str(a).strip() for a in (aspects or []) if str(a).strip()]
+    if not labels:
+        return ""
+    return CREATIVE_FREEDOM_INSTRUCTION_TEMPLATE.format(aspects=", ".join(labels))
 
 
 def build_enhancement_system_prompt(
     style: str = "photorealistic",
     natural_photo: bool = False,
     prompt_target: str = DEFAULT_PROMPT_TARGET,
+    video_mode: bool = False,
 ) -> str:
     """
     스타일/자연스러운 사진 모드/프롬프트 타겟에 맞는 개선용 시스템 프롬프트 반환
@@ -85,7 +128,13 @@ def build_enhancement_system_prompt(
         style: "photorealistic" 또는 "anime"
         natural_photo: 자연스러운 사진 모드 여부 (실사 스타일에서만 적용)
         prompt_target: "legacy"(SD/Flux 계열) 또는 "modern"(지시문 이해형 최신 모델)
+        video_mode: 숏폼 영상용 프롬프트 모드 (다른 모드보다 우선 적용)
     """
+    if video_mode:
+        return VIDEO_ENHANCEMENT_SYSTEM_PROMPT_TEMPLATE.format(style_desc=(
+            "live-action photorealistic" if style == "photorealistic" else "2D anime"
+        ))
+
     if natural_photo and style == "photorealistic":
         return NATURAL_ENHANCEMENT_SYSTEM_PROMPT
 
