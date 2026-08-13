@@ -110,7 +110,7 @@ export ANTHROPIC_API_KEY=your-anthropic-key
 
 ```bash
 # 프로젝트 루트에서 실행
-uv tool install --editable .
+uv tool install --python 3.13 --editable .
 
 # 실행 파일 경로를 PATH에 등록 (최초 1회)
 uv tool update-shell
@@ -130,8 +130,18 @@ promptgen --server.port 8080 --server.headless true
 
 참고 사항:
 
+- 기본 포트는 `28501` 임. Windows 의 Hyper-V/WinNAT 예약 포트 범위(8085~9003 등)와 겹치지 않도록 20000번대를 사용함. `--server.port` 또는 `STREAMLIT_SERVER_PORT` 로 변경 가능함. 예약 범위는 `netsh interface ipv4 show excludedportrange protocol=tcp` 로 확인 가능함.
 - `--editable` 설치이므로 소스를 수정하면 즉시 반영됨. 단, 프로젝트 디렉토리를 이동하거나 삭제하면 실행되지 않음.
-- 의존성이 변경된 경우 `uv tool install --editable . --force`로 재설치함.
+- `uv tool` 환경은 `.python-version` 을 따르지 않으므로 `--python 3.13` 을 명시해야 함. 생략하면 uv 기본 인터프리터(3.14 등)로 설치되어, Windows 에서 Ctrl+C 종료가 완료되지 않는 문제가 발생할 수 있음.
+- 현재 설치된 파이썬 버전은 `%APPDATA%\uv\tools\prompt-generator-for-images-and-videos\pyvenv.cfg` 에서 확인함.
+- 의존성이 변경된 경우 `uv tool install --python 3.13 --editable . --force`로 재설치함.
+- 파이썬 버전을 바꿀 때는 `--reinstall` 이 파일 잠금으로 실패할 수 있으므로 제거 후 재설치함.
+
+  ```bash
+  uv tool uninstall prompt-generator-for-images-and-videos
+  uv tool install --python 3.13 --editable .
+  ```
+
 - `.env`, `models.json`, `prompt_history.json`, `user_settings.json` 은 실행 위치와 무관하게 항상 프로젝트 루트를 기준으로 처리됨.
 - 제거하려면 `uv tool uninstall prompt-generator-for-images-and-videos`를 실행함.
 

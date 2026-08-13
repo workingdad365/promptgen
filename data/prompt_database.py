@@ -307,7 +307,8 @@ DATA = {
             "벚꽃길": "cherry blossom path",
             "산 정상 전망대": "mountain vista overlook",
             "빈티지 서점": "vintage bookstore",
-            "세련된 모던 오피스": "sleek modern office"
+            "세련된 모던 오피스": "sleek modern office",
+            "헬스장": "gym"
         },
         "nsfw": {
             "은은한 조명의 침실": "dimly lit intimate bedroom",
